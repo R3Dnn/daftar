@@ -47,7 +47,7 @@ function longPress(el, cb, ms = 520) {
 }
 
 const PAGE_COLS = ['id', 'user_id', 'parent_page_id', 'database_id', 'title', 'icon', 'cover', 'props', 'content', 'position', 'archived', 'notion_id', 'created_at'];
-const DB_COLS = ['id', 'user_id', 'parent_page_id', 'title', 'icon', 'schema', 'views', 'autogen', 'position', 'notion_id', 'created_at'];
+const DB_COLS = ['id', 'user_id', 'parent_page_id', 'title', 'icon', 'schema', 'views', 'autogen', 'templates', 'position', 'notion_id', 'created_at'];
 const pick = (o, cols) => { const r = {}; for (const c of cols) if (o[c] !== undefined) r[c] = o[c]; return r; };
 
 /* ---------- Supabase ---------- */

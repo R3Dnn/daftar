@@ -124,11 +124,11 @@ function editDate(page, prop, done) {
 function propsPanel(page, db) {
   const wrap = h('div');
   const draw = () => {
-    const props = db.schema.filter(p => p.id !== 'title');
+    const props = db.schema.filter(p => p.id !== 'title' && p.type !== 'created');
     wrap.replaceChildren(h('div', { class: 'props' }, props.flatMap(pr => {
       const val = h('div', { class: 'pv', onclick: () => editValue(page, pr, draw) }, valueEl(pr, page, { empty: 'فارغ' }));
       return [h('div', { class: 'pk' }, h('span', {}, PROP_TYPES[pr.type].icon), pr.name), val];
-    })), h('button', { class: 'btn sm ghost', style: 'margin-top:-10px', onclick: () => addPropSheet(db, null, pr => { draw(); }) }, '＋ خاصية'));
+    }), db.schema.some(p => p.type === 'date') ? [h('div', { class: 'pk' }, h('span', {}, '🔔'), 'تذكير'), h('div', { class: 'pv', onclick: () => remindSheet(page, draw) }, fmtRemind(page.props.__remind) || h('span', { class: 'muted' }, 'بدون'))] : []), h('button', { class: 'btn sm ghost', style: 'margin-top:-10px', onclick: () => addPropSheet(db, null, pr => { draw(); }) }, '＋ خاصية'));
   };
   draw(); return wrap;
 }
@@ -202,10 +202,10 @@ function currentView(db) {
   if (!db.views || !db.views.length) { db.views = [{ id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }]; touchDb(db); }
   return db.views.find(v => v.id === S.ui.view[db.id]) || db.views.find(v => v.default) || db.views[0];
 }
-function dbBody(db, rerender) {
-  const view = currentView(db);
+function dbBody(db, rerender, local) {
+  const view = (local && db.views.find(v => v.id === local.id)) || currentView(db);
   let q = '';
-  const tabs = h('div', { class: 'vtabs' }, db.views.map(v => h('button', { class: 'vtab' + (v.id === view.id ? ' on' : ''), onclick: () => { if (v.id === view.id) viewSheet(db, v, rerender); else { S.ui.view[db.id] = v.id; saveUi(); rerender(); } } }, VIEW_TYPES[v.type].icon, v.name)),
+  const tabs = h('div', { class: 'vtabs' }, db.views.map(v => h('button', { class: 'vtab' + (v.id === view.id ? ' on' : ''), onclick: () => { if (v.id === view.id) viewSheet(db, v, rerender); else { if (local) local.id = v.id; else { S.ui.view[db.id] = v.id; saveUi(); } rerender(); } } }, VIEW_TYPES[v.type].icon, v.name)),
     h('button', { class: 'vtab', onclick: () => addViewSheet(db, rerender) }, '＋ عرض'));
   const nf = (view.filters || []).length;
   const bar = h('div', { class: 'toolbar' },
@@ -214,7 +214,7 @@ function dbBody(db, rerender) {
     h('button', { class: 'btn sm', onclick: () => sortSheet(db, view, rerender) }, '⇅ ترتيب', view.sort ? h('span', { class: 'chip' }, view.sort.prop === '__created' ? 'تاريخ الإضافة' : ((db.schema.find(p => p.id === view.sort.prop) || {}).name || '') + (view.sort.dir === 'desc' ? ' ↓' : ' ↑')) : null),
     view.type === 'table' ? h('button', { class: 'btn sm', onclick: () => columnsSheet(db, view, rerender) }, '☷ الأعمدة') : null,
     h('span', { class: 'grow' }),
-    h('button', { class: 'btn primary', onclick: () => { if (view.type === 'week') { quickAddSheet(db, view, null, rerender); return; } const r = newPage({ database_id: db.id, props: presetsFromFilters(db, view) }); openRow(r.id); } }, view.type === 'week' ? '＋ فترة' : '＋ جديد'));
+    h('button', { class: 'btn primary', onclick: () => { if (view.type === 'week') { quickAddSheet(db, view, null, rerender); return; } newRowFlow(db, view, presetsFromFilters(db, view), rerender); } }, view.type === 'week' ? '＋ فترة' : '＋ جديد'));
   const bodyHost = h('div');
   const qa = (view.type === 'week' || view.type === 'gallery') ? null : h('input', { class: 'qadd', dir: 'auto', enterkeyhint: 'done', placeholder: view.type === 'calendar' ? '＋ اكتب مهمة لليوم واضغط Enter' : '＋ اكتب مهمة جديدة واضغط Enter' });
   if (qa) qa.addEventListener('keydown', e => {
@@ -244,11 +244,12 @@ function dbPage(db) {
   return h('div', {}, topbar(crumbsFor(db), head), h('div', { class: 'page wide' }, h('div', { class: 'db-head' }, iconB, titleIn), dbBody(db, rerender)));
 }
 /* قاعدة بيانات داخل صفحة (مثل نوشن): عنوان صغير + عروضها */
-function dbEmbed(db) {
+function dbEmbed(db, viewType) {
   const host = h('div', { class: 'dbembed' });
+  const fv = viewType && db.views.find(v => v.type === viewType); const local = fv ? { id: fv.id } : null;
   const re = () => {
     host.replaceChildren(h('div', { class: 'db-embed-h' }, h('span', {}, iconOf(db, 'db')), h('a', { class: 'db-embed-t', onclick: () => openItem('db', db.id) }, titleOf(db)),
-      h('button', { class: 'ibtn', style: 'width:36px;height:36px', 'aria-label': 'فتح كاملة', onclick: () => openItem('db', db.id) }, '↗')), dbBody(db, re));
+      h('button', { class: 'ibtn', style: 'width:36px;height:36px', 'aria-label': 'فتح كاملة', onclick: () => openItem('db', db.id) }, '↗')), dbBody(db, re, local));
   };
   re(); return host;
 }
@@ -283,6 +284,7 @@ function openRow(id) {
 function rowMenu(p, sh) {
   actionSheet(titleOf(p), [
     { icon: '⧉', label: 'تكرار', run: () => { const c = newPage({ database_id: p.database_id, title: (p.title || '') + ' (نسخة)', icon: p.icon, props: JSON.parse(JSON.stringify(p.props || {})) }); c.content = JSON.parse(JSON.stringify(p.content || [])).map(b => Object.assign(b, { id: uid() })); touchPage(c); if (sh) sh.close(); const m = $('#main'); if (S.route.t === 'd') m.replaceChildren(dbPage(S.dbs.get(S.route.id))); toast('تم التكرار'); } },
+    { icon: '💾', label: 'احفظها كنوع جاهز (يتكرر)', run: () => saveAsTemplate(p) },
     { icon: '🖼', label: 'تغيير صورة البطاقة (الغلاف)', run: () => coverSheet(p, () => { const m = $('#main'); if (m) render(); }) },
     { icon: '🙂', label: 'تغيير الأيقونة', run: () => emojiSheet(p.icon, e => { p.icon = e; touchPage(p); if (S.route.t === 'd') $('#main').replaceChildren(dbPage(S.dbs.get(S.route.id))); }) },
     { icon: '🗑', label: 'حذف', danger: true, run: async () => { if (await confirmSheet(`حذف «${titleOf(p)}»؟`)) { if (sh) sh.close(); await deletePageTree(p.id); if (S.route.t === 'd') $('#main').replaceChildren(dbPage(S.dbs.get(S.route.id))); } } }
@@ -328,7 +330,7 @@ function tableView(db, view, rows, rerender) {
     Sortable.create(tbody, { handle: '.rgrip', animation: 150, ghostClass: 'sortable-ghost', onEnd: e => reorderRow(e.item, view) });
   }
   const wrap = h('div', { class: 'tbl-wrap' }, h('table', {}, thead, tbody));
-  return h('div', {}, wrap, h('div', { class: 'newrow', onclick: () => { const r = newPage({ database_id: db.id, props: presetsFromFilters(db, view) }); openRow(r.id); } }, '＋ جديد'),
+  return h('div', {}, wrap, h('div', { class: 'newrow', onclick: () => newRowFlow(db, view, presetsFromFilters(db, view), rerender) }, '＋ جديد'),
     h('div', { class: 'muted', style: 'padding:4px 8px;font-size:13px' }, rows.length + ' عنصر'));
 }
 function cellTd(pr, r, rerender) {
@@ -379,7 +381,7 @@ function boardView(db, view, rows, rerender) {
       }
     });
     const head = h('div', { class: 'col-h' }, c.opt ? pill(c.opt) : h('span', { class: 'muted' }, 'بدون ' + gp.name), h('span', { class: 'muted' }, items.length), h('span', { class: 'grow' }),
-      h('button', { class: 'ibtn', style: 'width:36px;height:36px', 'aria-label': 'إضافة', onclick: () => { const pre = presetsFromFilters(db, view); if (c.id) pre[gp.id] = c.id; const r = newPage({ database_id: db.id, props: pre }); openRow(r.id); } }, '＋'));
+      h('button', { class: 'ibtn', style: 'width:36px;height:36px', 'aria-label': 'إضافة', onclick: () => { const pre = presetsFromFilters(db, view); if (c.id) pre[gp.id] = c.id; newRowFlow(db, view, pre, rerender); } }, '＋'));
     wrap.append(h('div', { class: 'col' }, head, body));
   }
   return wrap;
@@ -397,7 +399,7 @@ function listView(db, view, rows, rerender) {
     longPress(row, () => rowMenu(r)); list.append(row);
   }
   Sortable.create(list, { handle: '.rgrip', animation: 150, ghostClass: 'sortable-ghost', onEnd: e => reorderRow(e.item, view) });
-  box.append(list, h('div', { class: 'newrow', onclick: () => { const r = newPage({ database_id: db.id, props: presetsFromFilters(db, view) }); openRow(r.id); } }, '＋ جديد'));
+  box.append(list, h('div', { class: 'newrow', onclick: () => newRowFlow(db, view, presetsFromFilters(db, view), rerender) }, '＋ جديد'));
   if (!rows.length) box.prepend(h('div', { class: 'muted', style: 'padding:16px' }, 'لا عناصر'));
   return box;
 }
@@ -419,7 +421,7 @@ function calendarView(db, view, rows, rerender) {
   const key = db.id + ':' + view.id + ':' + mode; const today = new Date(), tk = ymd(today);
   const evs = [];
   for (const r of rows) { const v = r.props[dp.id]; if (v && v.start) { const s0 = v.start.slice(0, 10), e0 = (v.end || v.start).slice(0, 10); evs.push({ r, s: s0, e: e0 < s0 ? s0 : e0 }); } }
-  const addOn = k => () => { const pre = presetsFromFilters(db, view); pre[dp.id] = { start: k, end: null }; const r = newPage({ database_id: db.id, props: pre }); openRow(r.id); };
+  const addOn = k => () => { const pre = presetsFromFilters(db, view); pre[dp.id] = { start: k, end: null }; newRowFlow(db, view, pre, rerender, k); };
   const dropTo = lst => Sortable.create(lst, {
     group: 'cal-' + view.id, animation: 150, delay: 160, delayOnTouchOnly: true, ghostClass: 'sortable-ghost', draggable: '[data-single]', onEnd: e => {
       const r = S.pages.get(e.item.dataset.id); if (!r) return; const old = r.props[dp.id] || {};

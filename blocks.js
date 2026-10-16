@@ -141,8 +141,13 @@ function blocksEditor(page, arr, nested, redrawTop) {
       return fig;
     }
     if (b.type === 'columns') {
-      const grid = h('div', { class: 'cols', style: `grid-template-columns:${(b.cols || []).map(c => (c.w || 1) + 'fr').join(' ')}` });
-      for (const c of b.cols || []) { if (!c.blocks.length) c.blocks.push({ id: uid(), type: 'p', text: '', indent: 0 }); grid.append(h('div', { class: 'col-in' }, blocksEditor(page, c.blocks, true, top))); }
+      const grid = h('div', { class: 'cols' });
+      const handle = columnResizer(grid, b, save);
+      (b.cols || []).forEach((c, k) => {
+        if (k > 0) grid.append(handle(k - 1));
+        if (!c.blocks.length) c.blocks.push({ id: uid(), type: 'p', text: '', indent: 0 });
+        grid.append(h('div', { class: 'col-in' }, blocksEditor(page, c.blocks, true, top)));
+      });
       return grid;
     }
     if (b.type === 'embed') {
@@ -154,7 +159,7 @@ function blocksEditor(page, arr, nested, redrawTop) {
     if (b.type === 'timer') return timerEl(b, save);
     if (b.type === 'db') {
       const d = S.dbs.get(b.dbId);
-      return d ? dbEmbed(d) : h('div', { class: 'imgerr' }, 'قاعدة البيانات محذوفة');
+      return d ? dbEmbed(d, b.view) : h('div', { class: 'imgerr' }, 'قاعدة البيانات محذوفة');
     }
     return null;
   }

@@ -347,6 +347,7 @@ function itemMenu(kind, o) {
     { icon: '↗', label: 'فتح', run: () => openItem(kind, o.id) },
     { icon: '✏️', label: 'إعادة تسمية', run: async () => { const v = await promptSheet('الاسم', o.title || ''); if (v != null) { o.title = v; kind === 'db' ? touchDb(o) : touchPage(o); render(); } } },
     { icon: '🙂', label: 'تغيير الأيقونة', run: () => emojiSheet(o.icon, e => { o.icon = e; kind === 'db' ? touchDb(o) : touchPage(o); render(); }) },
+    kind === 'page' ? { icon: '↔', label: isFullPage(o) ? 'عرض عادي (هوامش)' : 'عرض كامل للشاشة', run: () => { o.props = o.props || {}; o.props.__full = !isFullPage(o); touchPage(o); render(); } } : null,
     kind === 'page' && !o.database_id ? { icon: '🏠', label: 'اجعلها صفحة البداية', run: () => { S.ui.startPage = o.id; saveUi(); toast('تمام، تفتح عليها عند تشغيل التطبيق'); } } : null,
     kind === 'page' ? { icon: '＋', label: 'صفحة فرعية', run: () => createPageIn(o.id) } : null,
     kind === 'page' ? { icon: '🗃️', label: 'قاعدة بيانات داخلها', run: () => createDbIn(o.id) } : null,
@@ -505,6 +506,7 @@ function homeView() {
 }
 
 /* ---------------- صفحة ---------------- */
+function isFullPage(p) { const f = p.props && p.props.__full; return f === undefined ? (p.content || []).some(b => b.type === 'columns') : !!f; }
 function autosize(t) { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }
 function pageView(page, { modal = false } = {}) {
   const db = page.database_id ? S.dbs.get(page.database_id) : null;
@@ -516,7 +518,7 @@ function pageView(page, { modal = false } = {}) {
   const coverEl = h('div', { class: 'cover' }, coverBtn);
   function paintCover() { coverEl.setAttribute('style', coverStyle(page.cover)); coverEl.classList.toggle('empty', !page.cover); coverBtn.textContent = page.cover ? '🖼 تغيير الغلاف' : '🖼 إضافة غلاف'; }
   paintCover();
-  const body = h('div', { class: 'page' }, iconBtn, title);
+  const body = h('div', { class: 'page' + (isFullPage(page) ? ' full' : '') }, iconBtn, title);
   if (db) body.append(propsPanel(page, db));
   body.append(blocksEditor(page));
   // صفحات فرعية

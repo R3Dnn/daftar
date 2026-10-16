@@ -289,6 +289,15 @@ details.help .btn{margin-bottom:12px}
 .gbtn.desc{min-height:86px;gap:3px}
 .gbtn.desc small{color:var(--muted);font-size:11.5px;line-height:1.35;text-align:center}
 
+/* فاصل الأعمدة القابل للسحب + عرض كامل */
+.col-rs{cursor:col-resize;position:relative;align-self:stretch;touch-action:none;min-height:60px}
+.col-rs::after{content:'';position:absolute;inset-block:0;left:6px;width:2px;border-radius:2px;background:transparent;transition:background .15s}
+.cols:hover>.col-rs::after{background:var(--line)}
+.col-rs:hover::after,.col-rs.on::after{background:var(--accent)!important;width:3px}
+@media(max-width:760px){.col-rs{display:none}}
+.page.full{max-width:none;padding-inline:clamp(16px,4vw,64px)}
+.cols{gap:0!important}
+
 /* sheets */
 #sheets{position:fixed;inset:0;z-index:100;pointer-events:none}
 .sheet-bg{position:fixed;inset:0;background:#000a;pointer-events:auto;display:flex;align-items:flex-end;justify-content:center;animation:fade .15s}

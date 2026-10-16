@@ -100,6 +100,8 @@ function todayView() {
     wrap.replaceChildren(
       h('div', { class: 'row', style: 'flex-wrap:wrap;margin:6px 0 10px' }, h('h1', { class: 'grow', style: 'font-size:28px;margin:0' }, 'يومك'),
         h('button', { class: 'btn primary', onclick: () => quickTaskSheet() }, '＋ مهمة سريعة')),
+      (() => { const due = remindersDue(); return due.length ? h('div', { style: 'margin-bottom:14px' }, h('div', { class: 's-label' }, h('span', {}, '🔔 تذكيرات'), h('span', {}, due.length)),
+        h('div', { class: 'wk-list' }, due.map(({ db, r, left }) => taskLine(db, r, draw, { extra: h('span', { class: 'pill c-' + (left <= 1 ? 'orange' : 'blue') }, left === 0 ? 'اليوم!' : left === 1 ? 'بكرة' : `باقي ${left} أيام`) })))) : null; })(),
       todayPanel(),
       soon.length ? h('div', { style: 'margin-top:14px' }, h('div', { class: 's-label' }, h('span', {}, 'القادم خلال أسبوع'), h('span', {}, soon.length)), h('div', { class: 'wk-list' }, soon.slice(0, 12).map(({ db, r }) => taskLine(db, r, draw)))) : null,
       late ? h('button', { class: 'btn ghost sm', style: 'margin-top:14px;color:var(--muted)', onclick: () => go('late') }, `عندك ${late} مهمة فات موعدها ← اعرضها`) : null);

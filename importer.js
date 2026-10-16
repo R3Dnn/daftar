@@ -128,14 +128,14 @@ function convertNotion(P, D, userId, existing, opts = {}) {
         case 'callout': mk('quote', { text: ((d.icon && d.icon.emoji) ? d.icon.emoji + ' ' : '') + rt(d.rich_text) }); break;
         case 'code': mk('p'); break;
         case 'divider': out.push({ id: uid(), type: 'divider', text: '', indent: 0 }); break;
-        case 'image': { if (d.type === 'external' && (d.external || {}).url) out.push({ id: uid(), type: 'image', url: d.external.url, text: rt(d.caption), indent: 0 }); break; /* صور مرفوعة داخل نوشن روابطها تنتهي بعد ساعة: لا تُنقل */ }
+        case 'image': { const u = d.type === 'external' ? (d.external || {}).url : (d.data_url && d.data_url.length > 600 ? d.data_url : null); if (u) out.push({ id: uid(), type: 'image', url: u, text: rt(d.caption), indent: 0 }); break; /* المرفوعة بنوشن تنتقل فقط إذا حمّلها سكربت السحب (data_url) */ }
         case 'column_list': {
           const cols = []; skipKids = true;
-          for (const c of b.children || []) { const inner = []; conv(c.children, 0, inner); cols.push({ id: uid(), blocks: cleanBlocks(inner) }); }
+          for (const c of b.children || []) { const inner = []; conv(c.children, 0, inner); const wr = c.column && c.column.width_ratio; cols.push({ id: uid(), w: wr ? +(wr * (b.children.length)).toFixed(3) : 1, blocks: cleanBlocks(inner) }); }
           if (cols.length) out.push({ id: uid(), type: 'columns', cols, indent: 0 });
           break;
         }
-        case 'child_database': if (!skipDb.has(b.id)) out.push({ id: uid(), type: 'db', dbId: nid(b.id), indent: 0 }); skipKids = true; break;
+        case 'child_database': if (!skipDb.has(b.id)) out.push(D[b.id] ? { id: uid(), type: 'db', dbId: nid(b.id), indent: 0 } : { id: uid(), type: 'db', missing: true, indent: 0 }); skipKids = true; break;
         case 'child_page': skipKids = true; break;
         case 'column': break;
         default: if (d.rich_text) mk('p');
@@ -164,6 +164,11 @@ function convertNotion(P, D, userId, existing, opts = {}) {
     const dbId = par.type === 'database_id' && D[par.database_id] && !skipDb.has(par.database_id) ? par.database_id : null;
     if (par.type === 'database_id' && !dbId) continue; // صف من قاعدة مستبعدة
     const out = []; conv(p.blocks, 0, out);
+    // قاعدة ما قدرنا نسحبها (مصادر بيانات مرتبطة) ← نعرض مكانها أول قاعدة بنفس الصفحة كتقويم
+    const flat = []; const fl = a => a.forEach(x => { flat.push(x); if (x.type === 'columns') x.cols.forEach(c => fl(c.blocks)); }); fl(out);
+    const real = flat.find(x => x.type === 'db' && !x.missing);
+    flat.filter(x => x.missing).forEach(x => { if (real) { x.dbId = real.dbId; x.view = 'calendar'; } delete x.missing; });
+    for (let k = out.length - 1; k >= 0; k--) if (out[k].type === 'db' && !out[k].dbId) out.splice(k, 1);
     let props = {}, title = (p.title || '').trim();
     if (dbId) {
       const info = dbInfo[dbId];
