@@ -218,7 +218,7 @@ function blocksEditor(page, arr, nested, redrawTop) {
   function blockMenu(b) {
     const i = idx(b), isText = 'text' in b && !['image', 'columns', 'embed', 'timer', 'db'].includes(b.type);
     openSheet({
-      title: 'الكتلة', body: api => h('div', {},
+      title: isText ? 'تحويل هذا السطر إلى…' : 'خيارات', body: api => h('div', {},
         isText ? h('div', { class: 'grid', style: 'margin-bottom:8px' }, Object.entries(BLOCK_TYPES).filter(([k]) => k !== 'divider').map(([k, v]) =>
           h('button', { class: 'gbtn', style: b.type === k ? 'border-color:var(--accent)' : '', onclick: () => { b.type = k; if (k === 'todo' && b.checked == null) b.checked = false; save(); api.close(); draw(b.id, (b.text || '').length); } }, h('b', {}, v.icon), v.label))) : null,
         b.type === 'columns' ? h('button', { class: 'act', onclick: () => { api.close(); if ((b.cols || []).length < 4) { b.cols.push({ id: uid(), w: 1, blocks: [{ id: uid(), type: 'p', text: '', indent: 0 }] }); save(); top(); } } }, h('span', { class: 'ai' }, '＋'), h('span', {}, 'إضافة عمود')) : null,
@@ -234,20 +234,34 @@ function blocksEditor(page, arr, nested, redrawTop) {
   }
   function addBlock(nb) { arr.push(nb); save(); nested ? top() : draw(nb.id, 0); }
   function addMenu() {
-    openSheet({
-      title: 'إضافة', body: api => h('div', {},
-        h('div', { class: 'grid' }, Object.entries(BLOCK_TYPES).map(([k, v]) => h('button', { class: 'gbtn', onclick: () => { api.close(); const nb = { id: uid(), type: k, text: '', indent: 0 }; if (k === 'todo') nb.checked = false; addBlock(nb); } }, h('b', {}, v.icon), v.label))),
+    const T = (k, ic, l, desc, fn) => h('button', { class: 'gbtn desc', onclick: () => { api0.close(); fn(); } }, h('b', {}, ic), h('span', {}, l), h('small', {}, desc));
+    let api0;
+    const text = k => () => { const nb = { id: uid(), type: k, text: '', indent: 0 }; if (k === 'todo') nb.checked = false; addBlock(nb); };
+    const dbIn = (tpl, view) => () => { addBlock(inlineDbBlock(page, tpl, view)); };
+    api0 = openSheet({
+      title: 'وش تبي تضيف؟', body: () => h('div', {},
+        h('div', { class: 's-label' }, 'كتابة'),
+        h('div', { class: 'grid' },
+          T('p', '¶', 'نص', 'كتابة عادية', text('p')), T('h1', 'H1', 'عنوان كبير', 'عنوان قسم', text('h1')), T('h2', 'H2', 'عنوان', 'عنوان فرعي', text('h2')),
+          T('todo', '☑', 'سطر مهمة', 'مربع صح بسيط داخل النص', text('todo')), T('ul', '•', 'نقاط', 'قائمة نقطية', text('ul')), T('ol', '1.', 'ترقيم', 'قائمة مرقّمة', text('ol')),
+          T('quote', '❝', 'اقتباس', 'نص بارز بخط جانبي', text('quote')), T('divider', '—', 'فاصل', 'خط يفصل الأقسام', text('divider'))),
+        h('div', { class: 's-label' }, 'قوائم وجداول داخل الصفحة'),
+        h('div', { class: 'grid' },
+          T('todo-db', '✅', 'قائمة مهام', 'جدول: المهمة، منجز، الموعد، التصنيف', dbIn('todo')),
+          T('cal-db', '📅', 'تقويم', 'مهام على تقويم شهري/أسبوعي', dbIn('todo', 'calendar')),
+          T('board-db', '▥', 'لوحة Kanban', 'أعمدة: لم يبدأ / قيد التنفيذ / منجز', dbIn('tasks', 'board')),
+          T('study-db', '📚', 'خطة مذاكرة', 'فصول + وقت مقدّر ومنقضي + مراجعة', dbIn('study')),
+          T('week-db', '🗓', 'جدول أسبوعي', 'دوام/مذاكرة/تمارين تتكرر كل أسبوع', dbIn('timetable')),
+          T('table-db', '▦', 'جدول فارغ', 'تصمم أعمدته بنفسك', dbIn('empty')),
+          T('exist-db', '🔗', 'قائمة موجودة', 'تعرض قائمة عندك أصلاً هنا', () => dbPicker(d => addBlock({ id: uid(), type: 'db', dbId: d.id, indent: 0 })))),
         h('div', { class: 's-label' }, 'تخطيط ووسائط'),
-        h('div', { class: 'grid' }, EXTRA_BLOCKS.filter(x => !(nested && x.k.startsWith('columns'))).map(x => h('button', {
-          class: 'gbtn', onclick: () => {
-            api.close();
-            if (x.k === 'image') imageSheet({ title: 'إضافة صورة', onPick: v => addBlock({ id: uid(), type: 'image', url: v, text: '', size: 'full', indent: 0 }) });
-            else if (x.k === 'columns2' || x.k === 'columns3') { const n = x.k === 'columns2' ? 2 : 3; addBlock({ id: uid(), type: 'columns', indent: 0, cols: Array.from({ length: n }, () => ({ id: uid(), w: 1, blocks: [{ id: uid(), type: 'p', text: '', indent: 0 }] })) }); }
-            else if (x.k === 'embed') promptSheet('رابط يوتيوب أو سبوتيفاي', '', { placeholder: 'https://', ok: 'إضافة' }).then(v => { if (v && v.trim()) addBlock({ id: uid(), type: 'embed', url: v.trim(), indent: 0 }); });
-            else if (x.k === 'timer') addBlock({ id: uid(), type: 'timer', minutes: 25, indent: 0 });
-            else if (x.k === 'db') dbPicker(d => addBlock({ id: uid(), type: 'db', dbId: d.id, indent: 0 }));
-          }
-        }, h('b', {}, x.icon), x.label))))
+        h('div', { class: 'grid' },
+          T('image', '🖼', 'صورة', 'رابط (بنترست…) أو من جهازك', () => imageSheet({ title: 'إضافة صورة', onPick: v => addBlock({ id: uid(), type: 'image', url: v, text: '', size: 'full', indent: 0 }) })),
+          nested ? null : T('c2', '◫', 'عمودين', 'تقسم الصفحة يمين ويسار', () => addBlock({ id: uid(), type: 'columns', indent: 0, cols: [0, 1].map(() => ({ id: uid(), w: 1, blocks: [{ id: uid(), type: 'p', text: '', indent: 0 }] })) })),
+          nested ? null : T('c3', '▥', 'ثلاثة أعمدة', 'ثلاث مساحات جنب بعض', () => addBlock({ id: uid(), type: 'columns', indent: 0, cols: [0, 1, 2].map(() => ({ id: uid(), w: 1, blocks: [{ id: uid(), type: 'p', text: '', indent: 0 }] })) })),
+          T('embed', '▶', 'يوتيوب / سبوتيفاي', 'فيديو أو أغنية تشتغل داخل الصفحة', () => promptSheet('الصق رابط يوتيوب أو سبوتيفاي', '', { placeholder: 'https://', ok: 'إضافة' }).then(v => { if (v && v.trim()) addBlock({ id: uid(), type: 'embed', url: v.trim(), indent: 0 }); })),
+          T('timer', '⏱', 'مؤقت تركيز', '15 / 25 / 45 / 60 دقيقة', () => addBlock({ id: uid(), type: 'timer', minutes: 25, indent: 0 }))),
+        h('button', { class: 'btn ghost sm', style: 'margin-top:12px', onclick: () => { api0.close(); go('help'); } }, '❓ ما عرفت؟ افتح دليل «كيف أسوي…؟»'))
     });
   }
   Sortable.create(list, {

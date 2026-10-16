@@ -10,7 +10,9 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{touch-action:manipulation;overscroll-behavior:none;-webkit-touch-callout:none}
 button,.btn,.ibtn,.tt,.node,.vtab,.chip,.gbtn,.act,th,.cal .dn{-webkit-user-select:none;user-select:none}
-#main,.sheet-b,.s-scroll,.tbl-wrap,.board,.week{overscroll-behavior:contain}
+#main,.sheet-b,.s-scroll{overscroll-behavior-y:contain}
+/* العناصر الأفقية تحبس التمرير الأفقي فقط — العمودي يكمل للصفحة */
+.tbl-wrap,.board,.week,.vtabs{overscroll-behavior-x:contain;overscroll-behavior-y:auto}
 .ptr{position:fixed;top:calc(var(--safe-t) + 6px);left:0;right:0;margin-inline:auto;width:max-content;background:var(--panel3);border:1px solid var(--line);padding:6px 14px;border-radius:99px;font-size:14px;z-index:40;transform:translateY(-70px);transition:transform .18s;pointer-events:none}
 .ptr.spin{transform:translateY(0)}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
@@ -252,6 +254,40 @@ tr.grp td{background:var(--panel2);cursor:pointer;height:38px;font-weight:600}
   .p-title{font-size:30px}
   .tm-t{font-size:44px}
 }
+
+
+/* --- v4: تنقّل، مهمة سريعة، دليل، تقويم ببطاقات --- */
+.badge{min-width:22px;height:22px;padding:0 6px;border-radius:99px;background:var(--panel3);color:var(--muted);font-size:12px;display:grid;place-items:center;margin-inline-end:6px}
+.banner{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 14px 0;padding:10px 14px;border-radius:12px;background:#6c8cff1f;border:1px solid #6c8cff55;font-size:14px}
+.qadd{margin:0 0 10px;background:var(--panel);border-style:dashed;min-height:42px}
+.qadd:focus{border-style:solid}
+.chip.on{background:var(--accent2);color:#fff}
+.seg{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:2px}
+.seg button{padding:6px 12px;border-radius:8px;color:var(--muted);min-height:32px}
+.seg button.on{background:var(--panel3);color:var(--text)}
+.cb.sm{width:20px;height:20px;border-radius:6px;font-size:12px;flex:none}
+.ccard,.cbar{display:flex;align-items:flex-start;gap:6px;padding:6px 7px;border-radius:9px;background:var(--panel3);cursor:pointer;margin:0 3px 3px;min-width:0}
+.cbar{z-index:1;margin:0 3px}
+.ccard .cc-b,.cbar .cc-b{flex:1;min-width:0}
+.ccard .cbt,.cbar .cbt{font-weight:600;font-size:13px;line-height:1.35;white-space:normal;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.cc-m{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:3px;font-size:12px}
+.cc-m .pill{font-size:11px;padding:0 6px}
+.cweek .evs{display:flex;flex-direction:column;padding:0;min-width:0}
+.cdn .dnum.now{background:var(--accent2);color:#fff;border-radius:99px}
+.week .ccard{margin:0}
+.ccard.multi{border-style:dashed}
+.tline{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.helpgrid{display:grid;gap:8px}
+details.help{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:4px 12px}
+details.help summary{display:flex;align-items:center;gap:10px;min-height:48px;cursor:pointer;font-weight:600;list-style:none}
+details.help summary::-webkit-details-marker{display:none}
+details.help summary::after{content:'▾';color:var(--muted)}
+details.help[open] summary::after{content:'▴'}
+details.help .hi{width:30px;text-align:center;font-size:20px}
+details.help ol{margin:0 0 10px;padding-inline-start:22px;color:#c9cfdd;line-height:1.8}
+details.help .btn{margin-bottom:12px}
+.gbtn.desc{min-height:86px;gap:3px}
+.gbtn.desc small{color:var(--muted);font-size:11.5px;line-height:1.35;text-align:center}
 
 /* sheets */
 #sheets{position:fixed;inset:0;z-index:100;pointer-events:none}

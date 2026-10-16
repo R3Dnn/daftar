@@ -4,14 +4,14 @@ const SKIP_DB_TITLES = [/^lesson plans$/i]; // قالب نوشن الجاهز، 
 const NOTION_ICON_MAP = { wall: '🧱', 'exclamation-mark': '❗', star: '⭐', home: '🏠', checkmark: '✅', calendar: '📅', book: '📖', fire: '🔥', heart: '❤️', target: '🎯', rocket: '🚀', clock: '🕒' };
 const ymdLocal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-function convertNotion(P, D, userId, existing) {
+function convertNotion(P, D, userId, existing, opts = {}) {
   const idMap = new Map();
   const nid = n => {
     if (existing && existing.has(n)) return existing.get(n);
     if (!idMap.has(n)) idMap.set(n, uid());
     return idMap.get(n);
   };
-  const isNew = n => !(existing && existing.has(n));
+  const isNew = n => opts.overwrite || !(existing && existing.has(n));
   const rt = a => (a || []).map(t => t.plain_text || '').join('');
   const COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
   const col = c => (COLORS.includes(c) ? c : 'gray');
@@ -207,5 +207,5 @@ function convertNotion(P, D, userId, existing) {
   pageOut.sort((a, b) => depthOf(a) - depthOf(b));
   const existingIds = existing ? new Set(existing.values()) : new Set();
   for (const x of pageOut) if (x.parent_page_id && !byId.has(x.parent_page_id) && !existingIds.has(x.parent_page_id)) x.parent_page_id = null;
-  return { pages: pageOut, dbs: dbOut };
+  return { pages: pageOut, dbs: dbOut, skipped: [...skipDb] };
 }

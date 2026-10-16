@@ -180,7 +180,7 @@ function visibleRows(db, view, qq) {
   if (q) rows = rows.filter(r => titleOf(r).toLowerCase().includes(q) || db.schema.some(p => p.id !== 'title' && textOf(p, r.props[p.id], r).toLowerCase().includes(q)));
   for (const f of view.filters || []) rows = rows.filter(r => matchFilter(db, r, f));
   if (view.sort) {
-    const prop = db.schema.find(p => p.id === view.sort.prop);
+    const prop = view.sort.prop === '__created' ? { id: '__created', type: 'created', name: 'تاريخ الإضافة' } : db.schema.find(p => p.id === view.sort.prop);
     if (prop) {
       const dir = view.sort.dir === 'desc' ? -1 : 1;
       const isEmpty = r => { if (prop.id === 'title' || prop.type === 'created') return false; const x = r.props[prop.id]; return x == null || x === '' || x === false || (Array.isArray(x) && !x.length) || (prop.type === 'date' && !x.start); };
@@ -211,18 +211,29 @@ function dbBody(db, rerender) {
   const bar = h('div', { class: 'toolbar' },
     h('input', { type: 'search', placeholder: '🔍 بحث', dir: 'auto', oninput: e => { q = e.target.value; renderViewBody(); } }),
     h('button', { class: 'btn sm', onclick: () => filterSheet(db, view, rerender) }, '⚲ فلتر', nf ? h('span', { class: 'chip' }, nf) : null),
-    h('button', { class: 'btn sm', onclick: () => sortSheet(db, view, rerender) }, '⇅ ترتيب', view.sort ? h('span', { class: 'chip' }, (db.schema.find(p => p.id === view.sort.prop) || {}).name) : null),
+    h('button', { class: 'btn sm', onclick: () => sortSheet(db, view, rerender) }, '⇅ ترتيب', view.sort ? h('span', { class: 'chip' }, view.sort.prop === '__created' ? 'تاريخ الإضافة' : ((db.schema.find(p => p.id === view.sort.prop) || {}).name || '') + (view.sort.dir === 'desc' ? ' ↓' : ' ↑')) : null),
     view.type === 'table' ? h('button', { class: 'btn sm', onclick: () => columnsSheet(db, view, rerender) }, '☷ الأعمدة') : null,
     h('span', { class: 'grow' }),
     h('button', { class: 'btn primary', onclick: () => { if (view.type === 'week') { quickAddSheet(db, view, null, rerender); return; } const r = newPage({ database_id: db.id, props: presetsFromFilters(db, view) }); openRow(r.id); } }, view.type === 'week' ? '＋ فترة' : '＋ جديد'));
   const bodyHost = h('div');
+  const qa = (view.type === 'week' || view.type === 'gallery') ? null : h('input', { class: 'qadd', dir: 'auto', enterkeyhint: 'done', placeholder: view.type === 'calendar' ? '＋ اكتب مهمة لليوم واضغط Enter' : '＋ اكتب مهمة جديدة واضغط Enter' });
+  if (qa) qa.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !qa.value.trim()) return;
+    const props = presetsFromFilters(db, view);
+    const dp = db.schema.find(p => p.type === 'date');
+    const today = (view.filters || []).some(f => f.op === 'today');
+    if (dp && (view.type === 'calendar' || today)) props[dp.id] = { start: ymd(new Date()), end: null };
+    if (view.type === 'board') { const gp = groupProp(db, view); if (gp && !props[gp.id] && (gp.options || [])[0]) props[gp.id] = gp.options[0].id; }
+    const st = db.schema.find(isStatusProp); if (st && !props[st.id]) { const first = (st.options || []).find(o => !DONE_RE.test(o.name) && !MISS_RE.test(o.name)); if (first) props[st.id] = first.id; }
+    newPage({ database_id: db.id, title: qa.value.trim(), props }); qa.value = ''; renderViewBody(); toast('✓ انضافت');
+  });
   function renderViewBody() {
     const rows = visibleRows(db, view, q);
     const el = view.type === 'week' ? weekView(db, view, rows, rerender) : view.type === 'board' ? boardView(db, view, rows, rerender) : view.type === 'calendar' ? calendarView(db, view, rows, rerender) : view.type === 'gallery' ? galleryView(db, view, rows, rerender) : view.type === 'list' ? listView(db, view, rows, rerender) : tableView(db, view, rows, rerender);
     bodyHost.replaceChildren(el);
   }
   renderViewBody();
-  return h('div', { class: 'dbbody' }, tabs, bar, bodyHost);
+  return h('div', { class: 'dbbody' }, tabs, bar, qa, bodyHost);
 }
 function dbPage(db) {
   const rerender = () => { const m = $('#main'); const t = m.scrollTop; m.replaceChildren(dbPage(db)); m.scrollTop = t; };
@@ -272,6 +283,7 @@ function openRow(id) {
 function rowMenu(p, sh) {
   actionSheet(titleOf(p), [
     { icon: '⧉', label: 'تكرار', run: () => { const c = newPage({ database_id: p.database_id, title: (p.title || '') + ' (نسخة)', icon: p.icon, props: JSON.parse(JSON.stringify(p.props || {})) }); c.content = JSON.parse(JSON.stringify(p.content || [])).map(b => Object.assign(b, { id: uid() })); touchPage(c); if (sh) sh.close(); const m = $('#main'); if (S.route.t === 'd') m.replaceChildren(dbPage(S.dbs.get(S.route.id))); toast('تم التكرار'); } },
+    { icon: '🖼', label: 'تغيير صورة البطاقة (الغلاف)', run: () => coverSheet(p, () => { const m = $('#main'); if (m) render(); }) },
     { icon: '🙂', label: 'تغيير الأيقونة', run: () => emojiSheet(p.icon, e => { p.icon = e; touchPage(p); if (S.route.t === 'd') $('#main').replaceChildren(dbPage(S.dbs.get(S.route.id))); }) },
     { icon: '🗑', label: 'حذف', danger: true, run: async () => { if (await confirmSheet(`حذف «${titleOf(p)}»؟`)) { if (sh) sh.close(); await deletePageTree(p.id); if (S.route.t === 'd') $('#main').replaceChildren(dbPage(S.dbs.get(S.route.id))); } } }
   ]);
@@ -391,65 +403,81 @@ function listView(db, view, rows, rerender) {
 }
 
 /* ---------- تقويم ---------- */
+function calCard(db, r, rerender, { bar = false, cls = '' } = {}) {
+  const st = rowState(db, r), track = isTaskDb(db);
+  const sel = db.schema.find(p => p.type === 'select' && !isStatusProp(p)), op = sel ? optOf(sel, r.props[sel.id]) : null;
+  const txt = db.schema.find(p => p.type === 'text'), note = txt ? (r.props[txt.id] || '') : '';
+  const cb = track ? h('button', { class: 'cb sm' + (st === 'done' ? ' on' : ''), 'aria-label': 'إنجاز', onclick: e => { e.stopPropagation(); toggleRowDone(db, r); rerender(); } }, st === 'done' ? '✓' : '') : null;
+  return h('div', { class: (bar ? 'cbar' : 'ccard') + (st ? ' st-' + st : '') + cls, 'data-id': r.id, onclick: () => openRow(r.id) },
+    cb, h('div', { class: 'cc-b' }, h('div', { class: 'cbt', dir: 'auto' }, (r.icon ? r.icon + ' ' : '') + titleOf(r)),
+      op || note ? h('div', { class: 'cc-m' }, op ? pill(op) : null, note ? h('span', { class: 'muted', dir: 'auto' }, String(note).slice(0, 40)) : null) : null));
+}
 function calendarView(db, view, rows, rerender) {
   const dp = db.schema.find(p => p.id === view.dateProp && p.type === 'date');
   if (!dp) return h('div', { class: 'muted', style: 'padding:20px' }, 'اختر خاصية «تاريخ» لهذا العرض.', h('div', { style: 'margin-top:10px' }, h('button', { class: 'btn', onclick: () => viewSheet(db, view, rerender) }, 'إعدادات العرض')));
-  const key = db.id + ':' + view.id; const today = new Date(), tk = ymd(today);
-  const ym = S.ui.cal[key] || `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
-  const [Y, M] = ym.split('-').map(Number);
-  const first = new Date(Y, M - 1, 1), start = new Date(Y, M - 1, 1 - first.getDay());
-  const shift = n => { const d = new Date(Y, M - 1 + n, 1); S.ui.cal[key] = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; saveUi(); rerender(); };
-  const label = new Intl.DateTimeFormat('ar-u-ca-gregory', { month: 'long', year: 'numeric' }).format(first);
-  const sel = db.schema.find(p => p.type === 'select' && !isStatusProp(p));
+  const mode = view.calMode || 'month';
+  const key = db.id + ':' + view.id + ':' + mode; const today = new Date(), tk = ymd(today);
   const evs = [];
   for (const r of rows) { const v = r.props[dp.id]; if (v && v.start) { const s0 = v.start.slice(0, 10), e0 = (v.end || v.start).slice(0, 10); evs.push({ r, s: s0, e: e0 < s0 ? s0 : e0 }); } }
-  const wrap = h('div', { class: 'cal2' });
-  const dow = h('div', { class: 'cdow' }); ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].forEach(d => dow.append(h('div', {}, d)));
-  wrap.append(dow);
-  const weeks = []; for (let w = 0; w < 6; w++) { const ws = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7); if (w >= 5 && ws.getMonth() !== M - 1) break; weeks.push(ws); }
-  for (const ws of weeks) {
-    const days = Array.from({ length: 7 }, (_, i) => new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + i)), keys = days.map(ymd);
-    const wk0 = keys[0], wk6 = keys[6];
-    const bars = [], singles = {};
-    for (const ev of evs) {
-      if (ev.e < wk0 || ev.s > wk6) continue;
-      if (ev.s === ev.e) { (singles[ev.s] = singles[ev.s] || []).push(ev); continue; }
-      const c1 = Math.max(0, keys.indexOf(ev.s < wk0 ? wk0 : ev.s)), c2 = keys.indexOf(ev.e > wk6 ? wk6 : ev.e);
-      bars.push({ ev, c1, c2, cutL: ev.s < wk0, cutR: ev.e > wk6 });
+  const addOn = k => () => { const pre = presetsFromFilters(db, view); pre[dp.id] = { start: k, end: null }; const r = newPage({ database_id: db.id, props: pre }); openRow(r.id); };
+  const dropTo = lst => Sortable.create(lst, {
+    group: 'cal-' + view.id, animation: 150, delay: 160, delayOnTouchOnly: true, ghostClass: 'sortable-ghost', draggable: '[data-single]', onEnd: e => {
+      const r = S.pages.get(e.item.dataset.id); if (!r) return; const old = r.props[dp.id] || {};
+      const t = old.start && old.start.length > 10 ? old.start.slice(10) : '';
+      r.props[dp.id] = { start: e.to.dataset.day + t, end: null }; touchPage(r); rerender();
     }
-    bars.sort((x, y) => x.c1 - y.c1 || (y.c2 - y.c1) - (x.c2 - x.c1));
-    const lanes = []; for (const b of bars) { let l = 0; while (lanes[l] && lanes[l] >= b.c1) l++; lanes[l] = b.c2; b.lane = l; }
-    const nl = lanes.length;
-    const grid = h('div', { class: 'cweek', style: `grid-template-rows:auto repeat(${nl},auto) minmax(34px,auto)` });
-    days.forEach((d, i) => {
-      grid.append(h('div', { class: 'cbg' + (d.getMonth() !== M - 1 ? ' out' : '') + (keys[i] === tk ? ' today' : ''), style: `grid-column:${i + 1};grid-row:1/-1` }));
-      grid.append(h('div', { class: 'cdn', style: `grid-column:${i + 1};grid-row:1` }, h('span', { class: 'dnum' }, d.getDate()),
-        h('button', { class: 'dn', 'aria-label': 'إضافة في هذا اليوم', onclick: () => { const pre = presetsFromFilters(db, view); pre[dp.id] = { start: keys[i], end: null }; const r = newPage({ database_id: db.id, props: pre }); openRow(r.id); } }, '＋')));
-    });
-    for (const b of bars) {
-      const r = b.ev.r, st = rowState(db, r), op = sel ? optOf(sel, r.props[sel.id]) : null;
-      grid.append(h('div', { class: 'cbar' + (st ? ' st-' + st : '') + (b.cutL ? ' cutl' : '') + (b.cutR ? ' cutr' : ''), style: `grid-column:${b.c1 + 1}/${b.c2 + 2};grid-row:${2 + b.lane}`, onclick: () => openRow(r.id) },
-        h('span', { class: 'cbt', dir: 'auto' }, (r.icon ? r.icon + ' ' : '') + titleOf(r)), op ? pill(op) : null));
+  });
+  const modeBtns = h('div', { class: 'seg' }, [['month', 'شهر'], ['week', 'أسبوع']].map(([m, l]) => h('button', { class: mode === m ? 'on' : '', onclick: () => { view.calMode = m; touchDb(db); rerender(); } }, l)));
+  let body, label, shift;
+  if (mode === 'week') {
+    const base = S.ui.cal[key] ? new Date(S.ui.cal[key] + 'T00:00:00') : weekStart(today);
+    shift = n => { const d = new Date(base); d.setDate(d.getDate() + 7 * n); S.ui.cal[key] = ymd(d); saveUi(); rerender(); };
+    const last = new Date(base); last.setDate(last.getDate() + 6); label = `${base.getDate()}/${base.getMonth() + 1} — ${last.getDate()}/${last.getMonth() + 1}`;
+    body = h('div', { class: 'week' });
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(base); d.setDate(d.getDate() + i); const k = ymd(d);
+      const lst = h('div', { class: 'wk-list', 'data-day': k, style: 'min-height:80px' });
+      for (const ev of evs) if (ev.s <= k && ev.e >= k) { const c = calCard(db, ev.r, rerender, { cls: ev.s === ev.e ? '' : ' multi' }); if (ev.s === ev.e) c.dataset.single = '1'; else c.append(h('span', { class: 'muted', style: 'font-size:11px;margin-inline-start:auto' }, `${Math.round((new Date(k) - new Date(ev.s)) / 864e5) + 1}/${Math.round((new Date(ev.e) - new Date(ev.s)) / 864e5) + 1}`)); lst.append(c); }
+      dropTo(lst);
+      body.append(h('div', { class: 'wk-col' + (k === tk ? ' today' : '') }, h('div', { class: 'wk-h' }, h('b', {}, DAYS[d.getDay()]), h('span', { class: 'muted' }, `${d.getDate()}/${d.getMonth() + 1}`), h('span', { class: 'grow' }),
+        h('button', { class: 'ibtn', style: 'width:32px;height:32px', 'aria-label': 'إضافة', onclick: addOn(k) }, '＋')), lst));
     }
-    days.forEach((d, i) => {
-      const lst = h('div', { class: 'evs', 'data-day': keys[i], style: `grid-column:${i + 1};grid-row:${2 + nl}` });
-      for (const ev of singles[keys[i]] || []) {
-        const r = ev.r, o = sel ? optOf(sel, r.props[sel.id]) : null, sc = stClass(db, r);
-        lst.append(h('div', { class: 'ev' + sc, 'data-id': r.id, style: o && !sc ? `border-inline-start:3px solid var(--c-${o.color || 'gray'})` : '', onclick: () => openRow(r.id) }, titleOf(r)));
+  } else {
+    const ym = S.ui.cal[key] || `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+    const [Y, M] = ym.split('-').map(Number);
+    const first = new Date(Y, M - 1, 1), start = new Date(Y, M - 1, 1 - first.getDay());
+    shift = n => { const d = new Date(Y, M - 1 + n, 1); S.ui.cal[key] = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; saveUi(); rerender(); };
+    label = new Intl.DateTimeFormat('ar-u-ca-gregory', { month: 'long', year: 'numeric' }).format(first);
+    body = h('div', { class: 'cal2' });
+    const dow = h('div', { class: 'cdow' }); DAYS.forEach(d => dow.append(h('div', {}, d))); body.append(dow);
+    for (let w = 0; w < 6; w++) {
+      const ws = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7); if (w >= 5 && ws.getMonth() !== M - 1) break;
+      const days = Array.from({ length: 7 }, (_, i) => new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + i)), keys = days.map(ymd), wk0 = keys[0], wk6 = keys[6];
+      const bars = [], singles = {};
+      for (const ev of evs) {
+        if (ev.e < wk0 || ev.s > wk6) continue;
+        if (ev.s === ev.e) { (singles[ev.s] = singles[ev.s] || []).push(ev); continue; }
+        bars.push({ ev, c1: keys.indexOf(ev.s < wk0 ? wk0 : ev.s), c2: keys.indexOf(ev.e > wk6 ? wk6 : ev.e), cutL: ev.s < wk0, cutR: ev.e > wk6 });
       }
-      Sortable.create(lst, {
-        group: 'cal-' + view.id, animation: 150, delay: 160, delayOnTouchOnly: true, ghostClass: 'sortable-ghost', onEnd: e => {
-          const r = S.pages.get(e.item.dataset.id); if (!r) return; const old = r.props[dp.id] || {};
-          const t = old.start && old.start.length > 10 ? old.start.slice(10) : '';
-          r.props[dp.id] = { start: e.to.dataset.day + t, end: old.end || null }; touchPage(r); rerender();
-        }
+      bars.sort((x, y) => x.c1 - y.c1 || (y.c2 - y.c1) - (x.c2 - x.c1));
+      const lanes = []; for (const b of bars) { let l = 0; while (lanes[l] !== undefined && lanes[l] >= b.c1) l++; lanes[l] = b.c2; b.lane = l; }
+      const nl = lanes.length;
+      const grid = h('div', { class: 'cweek', style: `grid-template-rows:auto repeat(${nl},auto) minmax(40px,auto)` });
+      days.forEach((d, i) => {
+        grid.append(h('div', { class: 'cbg' + (d.getMonth() !== M - 1 ? ' out' : '') + (keys[i] === tk ? ' today' : ''), style: `grid-column:${i + 1};grid-row:1/-1` }));
+        grid.append(h('div', { class: 'cdn', style: `grid-column:${i + 1};grid-row:1` }, h('span', { class: 'dnum' + (keys[i] === tk ? ' now' : '') }, d.getDate()), h('button', { class: 'dn', 'aria-label': 'إضافة في هذا اليوم', onclick: addOn(keys[i]) }, '＋')));
       });
-      grid.append(lst);
-    });
-    wrap.append(grid);
+      for (const b of bars) { const c = calCard(db, b.ev.r, rerender, { bar: true, cls: (b.cutL ? ' cutl' : '') + (b.cutR ? ' cutr' : '') }); c.style.cssText = `grid-column:${b.c1 + 1}/${b.c2 + 2};grid-row:${2 + b.lane}`; grid.append(c); }
+      days.forEach((d, i) => {
+        const lst = h('div', { class: 'evs', 'data-day': keys[i], style: `grid-column:${i + 1};grid-row:${2 + nl}` });
+        for (const ev of singles[keys[i]] || []) { const c = calCard(db, ev.r, rerender); c.dataset.single = '1'; lst.append(c); }
+        dropTo(lst); grid.append(lst);
+      });
+      body.append(grid);
+    }
   }
-  return h('div', {}, h('div', { class: 'cal-head' }, h('button', { class: 'ibtn', onclick: () => shift(-1), 'aria-label': 'الشهر السابق' }, '›'), h('b', { class: 'grow', style: 'text-align:center' }, label), h('button', { class: 'ibtn', onclick: () => shift(1), 'aria-label': 'الشهر التالي' }, '‹'),
-    h('button', { class: 'btn sm', onclick: () => { delete S.ui.cal[key]; saveUi(); rerender(); } }, 'اليوم')), wrap);
+  return h('div', {}, h('div', { class: 'cal-head' }, modeBtns, h('button', { class: 'ibtn', onclick: () => shift(-1), 'aria-label': 'السابق' }, '›'), h('b', { class: 'grow', style: 'text-align:center' }, label), h('button', { class: 'ibtn', onclick: () => shift(1), 'aria-label': 'التالي' }, '‹'),
+    h('button', { class: 'btn sm', onclick: () => { delete S.ui.cal[key]; saveUi(); rerender(); } }, 'اليوم')), body);
 }
 
 /* ---------- شيتات الإعدادات ---------- */
@@ -480,13 +508,19 @@ function filterSheet(db, view, rerender) {
   });
 }
 function sortSheet(db, view, rerender) {
+  const dp = db.schema.find(p => p.type === 'date');
+  const key = dp ? dp.id : '__created', kname = dp ? dp.name : 'تاريخ الإضافة';
   openSheet({
     title: 'الترتيب', onClose: rerender, body: api => {
-      const sel = h('select', {}, [h('option', { value: '' }, '— بدون ترتيب (يدوي) —')].concat(db.schema.map(p => h('option', { value: p.id, selected: view.sort && view.sort.prop === p.id }, p.name))));
-      const dir = view.sort ? view.sort.dir : 'asc';
-      const mk = d => h('button', { class: 'btn grow' + (dir === d && view.sort ? ' primary' : ''), onclick: () => { if (!sel.value) return; view.sort = { prop: sel.value, dir: d }; touchDb(db); api.close(); } }, d === 'asc' ? '↑ تصاعدي' : '↓ تنازلي');
-      sel.addEventListener('change', () => { if (!sel.value) { view.sort = null; touchDb(db); api.close(); } });
-      return h('div', {}, h('div', { class: 'field' }, sel), h('div', { class: 'row' }, mk('asc'), mk('desc')));
+      const set = (prop, dir) => { view.sort = prop ? { prop, dir } : null; touchDb(db); api.close(); };
+      const cur = view.sort ? view.sort.prop + ':' + view.sort.dir : '';
+      const quick = [[key, 'desc', `🕒 الأحدث أولاً (${kname})`], [key, 'asc', `🕰 الأقدم أولاً (${kname})`], ['__created', 'desc', '🆕 آخر ما أضفته'], ['title', 'asc', 'أ ← ي (الاسم)']];
+      const sel = h('select', {}, [h('option', { value: '' }, '— اختر خاصية —')].concat(db.schema.map(p => h('option', { value: p.id, selected: view.sort && view.sort.prop === p.id }, p.name))));
+      return h('div', {},
+        quick.map(([p, dir, l]) => h('button', { class: 'act', onclick: () => set(p, dir) }, h('span', {}, l), cur === p + ':' + dir ? h('span', { class: 'chk' }, '✓') : null)),
+        h('button', { class: 'act', onclick: () => set(null) }, h('span', {}, '✋ يدوي (اسحب الصفوف بنفسك)'), !view.sort ? h('span', { class: 'chk' }, '✓') : null),
+        h('div', { class: 's-label' }, 'ترتيب مخصص'), h('div', { class: 'field' }, sel),
+        h('div', { class: 'row' }, h('button', { class: 'btn grow', onclick: () => sel.value && set(sel.value, 'asc') }, '↑ تصاعدي'), h('button', { class: 'btn grow', onclick: () => sel.value && set(sel.value, 'desc') }, '↓ تنازلي')));
     }
   });
 }

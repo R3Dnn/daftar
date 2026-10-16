@@ -60,6 +60,9 @@ function newDb(opts = {}) {
   if (tpl === 'tasks') {
     title = 'المهام'; icon = '✅';
     schema.push({ id: uid(), name: 'الحالة', type: 'status', options: statusOpts }, { id: uid(), name: 'الموعد', type: 'date' }, { id: uid(), name: 'ملاحظات', type: 'text' });
+  } else if (tpl === 'todo') {
+    title = 'قائمة مهام'; icon = '✅'; schema[0].name = 'المهمة';
+    schema.push({ id: uid(), name: 'منجز', type: 'checkbox' }, { id: uid(), name: 'الموعد', type: 'date' }, { id: uid(), name: 'التصنيف', type: 'select', options: [] }, { id: uid(), name: 'ملاحظات', type: 'text' });
   } else if (tpl === 'study') {
     title = 'خطة المذاكرة'; icon = '📚';
     schema[0].name = 'الفصل / الموضوع';
@@ -78,9 +81,9 @@ function newDb(opts = {}) {
   const sj = schema.find(x => x.name === 'المادة'), cbDone = schema.find(x => x.name === 'منجز'), cbRev = schema.find(x => x.name === 'للمراجعة'), dtS = schema.find(x => x.name === 'الموعد');
   const studyViews = tpl === 'study' ? [{ id: uid(), name: 'حسب المادة', type: 'table', group: sj.id, filters: [], sort: null }, { id: uid(), name: 'غير المنجز', type: 'table', filters: [{ prop: cbDone.id, op: 'is', value: false }], sort: null },
     { id: uid(), name: 'قائمة المراجعة', type: 'table', filters: [{ prop: cbRev.id, op: 'is', value: true }], sort: null }, { id: uid(), name: 'تقويم', type: 'calendar', dateProp: dtS.id, filters: [], sort: null }] : null;
-  const views = studyViews ? studyViews : tpl === 'timetable' ? [{ id: uid(), name: 'الأسبوع', type: 'week', filters: [], sort: null }, { id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }] : [{ id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }];
-  const st = schema.find(s => s.type === 'status'); if (st) views.push({ id: uid(), name: 'لوحة', type: 'board', groupBy: st.id, filters: [], sort: null });
-  const dt = schema.find(s => s.type === 'date'); if (dt) views.push({ id: uid(), name: 'تقويم', type: 'calendar', dateProp: dt.id, filters: [], sort: null });
+  const views = tpl === 'todo' ? todoViewsFn(schema) : studyViews ? studyViews : tpl === 'timetable' ? [{ id: uid(), name: 'الأسبوع', type: 'week', filters: [], sort: null }, { id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }] : [{ id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }];
+  const st = schema.find(s => s.type === 'status'); if (st && !views.some(v => v.type === 'board')) views.push({ id: uid(), name: 'لوحة', type: 'board', groupBy: st.id, filters: [], sort: null });
+  const dt = schema.find(s => s.type === 'date'); if (dt && !views.some(v => v.type === 'calendar') && tpl !== 'timetable') views.push({ id: uid(), name: 'تقويم', type: 'calendar', dateProp: dt.id, filters: [], sort: null });
   const d = {
     id: uid(), user_id: S.user && S.user.id, parent_page_id: opts.parent_page_id || null, title, icon, schema, views,
     position: nextPos(kidsOf(opts.parent_page_id || null)), notion_id: null, created_at: nowIso(), updated_at: nowIso()
@@ -243,8 +246,8 @@ function emojiSheet(current, onPick) {
 
 /* ---------------- التوجيه ---------------- */
 function parseHash() {
-  const m = location.hash.match(/^#\/(p|d)\/([\w-]+)/);
-  S.route = m ? { t: m[1], id: m[2] } : { t: 'home' };
+  const m = location.hash.match(/^#\/(p|d)\/([\w-]+)/), s = location.hash.match(/^#\/(today|late|help)\b/);
+  S.route = m ? { t: m[1], id: m[2] } : s ? { t: s[1] } : { t: 'home' };
 }
 function go(path) { const target = path ? '#/' + path : '#/'; if (location.hash === target) render(); else location.hash = target; }
 window.addEventListener('hashchange', () => { parseHash(); closeDrawer(); render(); try { $('#main').scrollTop = 0; } catch (e) {} });
@@ -277,15 +280,17 @@ function renderSide() {
     h('div', { class: 's-head' }, h('div', { class: 'logo' }, '📓 دفتر'), h('span', { class: 'sync', id: 'syncind' }), h('button', { class: 'ibtn', 'aria-label': 'تحديث', onclick: refreshAll }, '↻'), h('button', { class: 'ibtn', 'aria-label': 'الإعدادات', onclick: openSettings }, '⚙')),
     h('div', { class: 's-search' }, h('input', { type: 'search', placeholder: '🔍 بحث', value: S.ui.search, dir: 'auto', oninput: e => { S.ui.search = e.target.value; saveUi(); const pos = e.target.selectionStart; renderSide(); const n = $('.s-search input'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } } })),
     h('div', { class: 's-foot' },
-      h('button', { class: 'btn primary', onclick: () => createPageIn(null) }, '＋ صفحة'),
-      h('button', { class: 'btn', onclick: () => createDbIn(null) }, '＋ قاعدة بيانات')),
+      h('button', { class: 'btn primary', onclick: () => { closeDrawer(); quickTaskSheet(); } }, '⚡ مهمة سريعة'),
+      h('button', { class: 'btn', onclick: () => createPageIn(null) }, '＋ صفحة'),
+      h('button', { class: 'btn', onclick: () => templatesSheet(null), 'aria-label': 'قوالب' }, '✨')),
     tree
   );
   // نضع الشريط السفلي بعد القائمة: الترتيب العمودي: head, search, tree(flex:1), foot
   side.append(side.querySelector('.s-foot'));
   setSync(S.sync);
-  const home = h('div', { class: 'node' + (S.route.t === 'home' ? ' active' : '') }, h('span', { class: 'tw none' }, '▾'), h('span', { class: 'ic' }, '🏠'), h('div', { class: 'tt', onclick: () => go('') }, 'الرئيسية'));
-  tree.prepend(home);
+  const nav = (t, ic, label, fn, badge) => h('div', { class: 'node' + (S.route.t === t ? ' active' : '') }, h('span', { class: 'tw none' }, '▾'), h('span', { class: 'ic' }, ic), h('div', { class: 'tt', onclick: fn }, label), badge ? h('span', { class: 'badge' }, badge) : null);
+  const nl = lateItems().length;
+  tree.prepend(nav('home', '🏠', 'الرئيسية', () => go('')), nav('today', '📅', 'اليوم', () => go('today')), nav('late', '⏰', 'المتأخرة', () => go('late'), nl || null), nav('help', '❓', 'كيف أسوي…؟', () => go('help')));
 }
 function treeLevel(parentId) {
   const wrap = h('div', { class: 'kids', 'data-parent': parentId || '' });
@@ -378,7 +383,7 @@ function createPageIn(parentId) {
 function createDbIn(parentId) {
   openSheet({
     title: 'قاعدة بيانات جديدة', body: api => h('div', { class: 'grid' },
-      [['study', '📚', 'خطة مذاكرة (فصول + وقت + مراجعة)'], ['timetable', '🗓', 'جدول أسبوعي (دوام/مذاكرة/تمارين)'], ['tasks', '✅', 'مهام (حالة + موعد)'], ['habits', '💪', 'متتبع عادات'], ['empty', '🗃️', 'جدول فارغ']].map(([t, ic, lb]) =>
+      [['todo', '✅', 'قائمة مهام (منجز + موعد + تصنيف)'], ['study', '📚', 'خطة مذاكرة (فصول + وقت + مراجعة)'], ['timetable', '🗓', 'جدول أسبوعي (دوام/مذاكرة/تمارين)'], ['tasks', '📋', 'مهام بحالات (لوحة Kanban)'], ['habits', '💪', 'متتبع عادات'], ['empty', '🗃️', 'جدول فارغ']].map(([t, ic, lb]) =>
         h('button', { class: 'gbtn', onclick: () => { api.close(); const d = newDb({ template: t, parent_page_id: parentId }); if (parentId && !S.ui.expanded.includes(parentId)) S.ui.expanded.push(parentId); openItem('db', d.id); closeDrawer(); } }, h('b', {}, ic), lb)))
   });
 }
@@ -420,7 +425,7 @@ function openSettings() {
       const imp = h('input', { type: 'file', accept: '.json,application/json', multiple: true, hidden: true });
       imp.addEventListener('change', async () => { if (imp.files.length) { api.close(); await importFiles([...imp.files]); } });
       return h('div', {}, info, imp,
-        h('button', { class: 'act', onclick: () => imp.click() }, h('span', { class: 'ai' }, '📥'), h('span', {}, 'استيراد من نوشن (ملفا pages.json و databases.json)')),
+        h('button', { class: 'act', onclick: () => imp.click() }, h('span', { class: 'ai' }, '📥'), h('span', {}, 'تحديث / استيراد من نوشن (ملفا pages.json و databases.json)')),
         h('button', { class: 'act', onclick: exportBackup }, h('span', { class: 'ai' }, '💾'), h('span', {}, 'تنزيل نسخة احتياطية (JSON)')),
         store.kind === 'supabase' ? h('button', { class: 'act danger', onclick: async () => { api.close(); await flush(); await store.signOut(); location.reload(); } }, h('span', { class: 'ai' }, '🚪'), h('span', {}, 'تسجيل خروج')) : null,
         store.kind === 'local' ? h('button', { class: 'act danger', onclick: () => { localStorage.removeItem('daftar_demo_v1'); location.reload(); } }, h('span', { class: 'ai' }, '↺'), h('span', {}, 'إعادة بيانات التجربة')) : null);
@@ -439,10 +444,12 @@ async function importFiles(files) {
     const existing = new Map();
     for (const p of S.pages.values()) if (p.notion_id) existing.set(p.notion_id, p.id);
     for (const d of S.dbs.values()) if (d.notion_id) existing.set(d.notion_id, d.id);
-    const conv = convertNotion(P, D, S.user.id, existing);
+    const conv = convertNotion(P, D, S.user.id, existing, { overwrite: true });
     t.textContent = `جارٍ الرفع: ${conv.dbs.length} قاعدة، ${conv.pages.length} صفحة…`;
     await store.upsert('dbs', conv.dbs); conv.dbs.forEach(d => S.dbs.set(d.id, d));
     await store.upsert('pages', conv.pages); conv.pages.forEach(p => S.pages.set(p.id, p));
+    // حذف قواعد مستبعدة استوردت سابقاً (Lesson Plans)
+    for (const d of [...S.dbs.values()]) if (d.notion_id && conv.skipped.includes(d.notion_id)) { try { await store.remove('dbs', d.id); } catch (e) {} for (const r of dbRows(d.id)) S.pages.delete(r.id); S.dbs.delete(d.id); }
     const home = conv.pages.find(p => /^unbeatable/i.test((p.title || '').trim()) && !p.database_id);
     if (home) { S.ui.startPage = home.id; saveUi(); }
     try { ensureAutogenAll(); } catch (e) { console.warn(e); }
@@ -473,7 +480,11 @@ function renderMain() {
       main.replaceChildren(pageView(p)); return; }
     main.replaceChildren(pageView(p)); }
   else if (r.t === 'd' && S.dbs.has(r.id)) main.replaceChildren(dbPage(S.dbs.get(r.id)));
-  else main.replaceChildren(homeView());
+  else if (r.t === 'today') main.replaceChildren(todayView());
+  else if (r.t === 'late') main.replaceChildren(lateView());
+  else if (r.t === 'help') main.replaceChildren(helpView());
+  else { const sp = S.ui.startPage && S.pages.get(S.ui.startPage); main.replaceChildren(sp ? pageView(sp) : todayView()); }
+  const bn = staleImportBanner(); if (bn) main.prepend(bn);
   setSync(S.sync);
 }
 function homeView() {

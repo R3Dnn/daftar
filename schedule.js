@@ -209,11 +209,6 @@ function todayPanel() {
       kids.push(h('div', { class: 'bar' }, h('i', { style: `width:${Math.round(100 * doneN / items.length)}%` })));
       kids.push(h('div', { class: 'wk-list' }, items.map(o => occEl(o, draw, { showDb: true }))));
     } else kids.push(h('div', { class: 'muted', style: 'padding:8px 2px' }, 'ما فيه شيء مجدول اليوم 🎉'));
-    if (late.length) {
-      kids.push(h('div', { class: 's-label', style: 'color:var(--c-red)' }, h('span', {}, `مهام متأخرة (${late.length})`)));
-      kids.push(h('div', { class: 'wk-list' }, late.slice(0, 8).map(o => { const e = occEl(o, draw, { showDb: true }); const t = e.querySelector('.wk-time'); const lab = `${o.key.slice(5).replace('-', '/')}${o.start ? ' · ' + o.start : ''}`; if (t) t.textContent = lab; else e.querySelector('.wk-body').prepend(h('div', { class: 'wk-time' }, lab)); return e; })));
-      if (late.length > 8) kids.push(h('div', { class: 'muted', style: 'padding:4px 2px;font-size:13px' }, `+${late.length - 8} أخرى`));
-    }
     wrap.replaceChildren(...kids);
   };
   draw(); return wrap;
