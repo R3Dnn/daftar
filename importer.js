@@ -1,5 +1,9 @@
 'use strict';
 /* تحويل تصدير نوشن (pages.json + databases.json من سكربت السحب) إلى هيكل «دفتر» */
+const SKIP_DB_TITLES = [/^lesson plans$/i]; // قالب نوشن الجاهز، مو من بيانات المستخدم
+const NOTION_ICON_MAP = { wall: '🧱', 'exclamation-mark': '❗', star: '⭐', home: '🏠', checkmark: '✅', calendar: '📅', book: '📖', fire: '🔥', heart: '❤️', target: '🎯', rocket: '🚀', clock: '🕒' };
+const ymdLocal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 function convertNotion(P, D, userId, existing) {
   const idMap = new Map();
   const nid = n => {
@@ -11,8 +15,15 @@ function convertNotion(P, D, userId, existing) {
   const rt = a => (a || []).map(t => t.plain_text || '').join('');
   const COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
   const col = c => (COLORS.includes(c) ? c : 'gray');
+  const iconOf = ic => !ic ? null : ic.type === 'emoji' ? ic.emoji : (ic.type === 'icon' && ic.icon ? (NOTION_ICON_MAP[ic.icon.name] || null) : null);
+  const coverOf = c => !c ? null : (c.type === 'external' ? c.external.url : (c.file ? c.file.url : null));
 
-  // أي كتلة -> أي صفحة تحتويها (لقواعد البيانات والصفحات التي أبوها block)
+  // قواعد مستبعدة (وكل صفوفها)
+  const skipDb = new Set(Object.values(D).filter(d => SKIP_DB_TITLES.some(re => re.test((d.title || '').trim()))).map(d => d.id));
+  const skipPages = new Set();
+  for (const id of skipDb) for (const r of D[id].rows || []) skipPages.add(r);
+
+  // أي كتلة -> أي صفحة تحتويها
   const blockToPage = new Map();
   const walk = (pid, bs) => { for (const b of bs || []) { blockToPage.set(b.id, pid); walk(pid, b.children); } };
   for (const p of Object.values(P)) walk(p.id, p.blocks);
@@ -22,8 +33,6 @@ function convertNotion(P, D, userId, existing) {
     if (par.type === 'block_id') return P[par.block_id] ? par.block_id : (blockToPage.get(par.block_id) || null);
     return null;
   };
-
-  // ترتيب الأبناء حسب ظهورهم في كتل أبيهم
   const order = new Map();
   for (const p of Object.values(P)) {
     let i = 0; const go = bs => { for (const b of bs || []) { if (b.type === 'child_page' || b.type === 'child_database') order.set(b.id, i++); go(b.children); } };
@@ -32,17 +41,18 @@ function convertNotion(P, D, userId, existing) {
 
   /* ---- قواعد البيانات ---- */
   const dbOut = [], dbInfo = {};
+  const rel = (name, t) => ({ prop: name, op: t });
   for (const d of Object.values(D)) {
+    if (skipDb.has(d.id)) continue;
     const schema = [], byName = {};
     for (const [name, pr] of Object.entries(d.properties || {})) {
       const t = pr.type;
-      if (t === 'title') { const sp = { id: 'title', name: name || 'الاسم', type: 'title' }; schema.unshift(sp); byName[name] = sp; continue; }
+      if (t === 'title') { const sp = { id: 'title', name: name.trim() || 'الاسم', type: 'title' }; schema.unshift(sp); byName[name] = sp; continue; }
       let type = null, options;
       if (t === 'rich_text') type = 'text';
       else if (['number', 'date', 'checkbox', 'url'].includes(t)) type = t;
       else if (['select', 'multi_select', 'status'].includes(t)) {
-        type = t;
-        options = (pr[t].options || []).map(o => ({ id: o.id || o.name, name: o.name, color: col(o.color) }));
+        type = t; options = (pr[t].options || []).map(o => ({ id: o.id || o.name, name: o.name, color: col(o.color) }));
       } else if (t === 'created_time') type = 'created';
       if (!type) continue;
       const sp = { id: 'p_' + (pr.id || name).replace(/[^\w]/g, ''), name: name || (type === 'checkbox' ? 'منجز' : 'خاصية'), type };
@@ -51,17 +61,52 @@ function convertNotion(P, D, userId, existing) {
     }
     if (!schema.find(s => s.id === 'title')) schema.unshift({ id: 'title', name: 'الاسم', type: 'title' });
     dbInfo[d.id] = { schema, byName };
-    const views = [];
-    const dt = schema.find(s => s.type === 'date');
-    views.push({ id: uid(), name: 'جدول', type: 'table', filters: [], sort: dt ? { prop: dt.id, dir: 'desc' } : null });
-    const sel = schema.find(s => s.type === 'status') || schema.find(s => s.type === 'select');
-    if (sel) views.push({ id: uid(), name: 'لوحة', type: 'board', groupBy: sel.id, filters: [], sort: null });
-    if (dt) views.push({ id: uid(), name: 'تقويم', type: 'calendar', dateProp: dt.id, filters: [], sort: null });
+    const rows = (d.rows || []).map(r => P[r]).filter(Boolean);
+    const dt = schema.find(s => s.type === 'date'), cbp = schema.find(s => s.type === 'checkbox');
+    const statusP = schema.find(s => s.type === 'status') || schema.find(s => s.type === 'select' && /status|حالة/i.test(s.name));
+    const subjP = schema.find(s => s.type === 'select' && s !== statusP);
+    const V = (name, type, extra) => Object.assign({ id: uid(), name, type, filters: [], sort: null }, extra || {});
+    const T = (d.title || '').trim();
+    let views = [], autogen = null;
+    if (/habit/i.test(T) && statusP && dt) {
+      // عروضه في نوشن: All / Today / Yesterday / List / Calendar
+      views = [V('الكل', 'table', { sort: { prop: dt.id, dir: 'desc' } }),
+        V('اليوم', 'board', { groupBy: statusP.id, filters: [{ prop: dt.id, op: 'today' }] }),
+        V('أمس', 'board', { groupBy: statusP.id, filters: [{ prop: dt.id, op: 'yesterday' }] }),
+        V('قائمة', 'list', { sort: { prop: dt.id, dir: 'desc' } }), V('تقويم', 'calendar', { dateProp: dt.id })];
+      views.find(v => v.name === 'اليوم').default = true;
+      // استنتاج قواعد التكرار اليومي من آخر 5 أسابيع من بياناته
+      const dates = rows.map(r => ((r.properties[Object.keys(d.properties).find(k => d.properties[k].type === 'date')] || {}).date || {}).start).filter(Boolean).sort();
+      if (dates.length) {
+        const last = dates[dates.length - 1].slice(0, 10), lastD = new Date(last + 'T00:00:00'), from = new Date(lastD); from.setDate(from.getDate() - 34);
+        const cnt = {}, icons = {};
+        const dn = Object.keys(d.properties).find(k => d.properties[k].type === 'date'), tn = Object.keys(d.properties).find(k => d.properties[k].type === 'title');
+        for (const r of rows) {
+          const ds = ((r.properties[dn] || {}).date || {}).start; if (!ds) continue; const dd = new Date(ds.slice(0, 10) + 'T00:00:00'); if (dd < from) continue;
+          const base = rt((r.properties[tn] || {}).title).replace(/\s*\(\d+\)\s*$/, '').trim(); if (!base) continue;
+          (cnt[base] = cnt[base] || [0, 0, 0, 0, 0, 0, 0])[dd.getDay()]++; icons[base] = iconOf(r.icon) || icons[base];
+        }
+        const rules = Object.entries(cnt).map(([title, c]) => ({ title, icon: icons[title] || null, days: c.map((n, i) => n >= 2 ? i : -1).filter(i => i >= 0) })).filter(r => r.days.length);
+        const pend = (statusP.options || []).find(o => /pending|لم|قيد/i.test(o.name)) || statusP.options[0];
+        autogen = { rules, last, dateProp: dt.id, statusProp: statusP.id, pending: pend && pend.id };
+      }
+    } else if (cbp && subjP && dt) {
+      // To Do List: ALL / UNCOMPLETE / UNSCHEDULED / SUBJECTS
+      views = [V('الكل', 'table'), V('غير المنجز', 'table', { filters: [{ prop: cbp.id, op: 'is', value: false }] }),
+        V('بدون موعد', 'table', { filters: [{ prop: dt.id, op: 'empty' }] }), V('حسب المادة', 'table', { group: subjP.id }),
+        V('تقويم', 'calendar', { dateProp: dt.id })];
+    } else if (T === 'YSF') {
+      views = [V('معرض', 'gallery')];
+    } else {
+      views = [V('جدول', 'table', { sort: dt ? { prop: dt.id, dir: 'desc' } : null })];
+      if (statusP || subjP) views.push(V('لوحة', 'board', { groupBy: (statusP || subjP).id }));
+      if (dt) views.push(V('تقويم', 'calendar', { dateProp: dt.id }));
+    }
     if (!isNew(d.id)) continue;
     dbOut.push({
       id: nid(d.id), user_id: userId, parent_page_id: pageOf(d.parent) ? nid(pageOf(d.parent)) : null,
-      title: (d.title || '').trim() || 'قاعدة بيانات', icon: d.icon && d.icon.type === 'emoji' ? d.icon.emoji : null,
-      schema, views, position: order.get(d.id) || 0, notion_id: d.id, created_at: new Date().toISOString()
+      title: T || 'قاعدة بيانات', icon: iconOf(d.icon), schema, views, autogen,
+      position: order.get(d.id) || 0, notion_id: d.id, created_at: new Date().toISOString()
     });
   }
 
@@ -70,6 +115,7 @@ function convertNotion(P, D, userId, existing) {
     for (const b of bs || []) {
       const t = b.type, d = b[t] || {};
       const mk = (type, extra) => out.push(Object.assign({ id: uid(), type, text: rt(d.rich_text), indent: depth }, extra || {}));
+      let skipKids = false;
       switch (t) {
         case 'paragraph': mk('p'); break;
         case 'heading_1': mk('h1'); break;
@@ -82,23 +128,29 @@ function convertNotion(P, D, userId, existing) {
         case 'callout': mk('quote', { text: ((d.icon && d.icon.emoji) ? d.icon.emoji + ' ' : '') + rt(d.rich_text) }); break;
         case 'code': mk('p'); break;
         case 'divider': out.push({ id: uid(), type: 'divider', text: '', indent: 0 }); break;
-        case 'image': out.push({ id: uid(), type: 'p', text: '🖼 ' + (rt(d.caption) || '(صورة لم تُنقل)'), indent: depth }); break;
-        case 'child_page': case 'child_database': case 'column_list': case 'column': break;
+        case 'image': { if (d.type === 'external' && (d.external || {}).url) out.push({ id: uid(), type: 'image', url: d.external.url, text: rt(d.caption), indent: 0 }); break; /* صور مرفوعة داخل نوشن روابطها تنتهي بعد ساعة: لا تُنقل */ }
+        case 'column_list': {
+          const cols = []; skipKids = true;
+          for (const c of b.children || []) { const inner = []; conv(c.children, 0, inner); cols.push({ id: uid(), blocks: cleanBlocks(inner) }); }
+          if (cols.length) out.push({ id: uid(), type: 'columns', cols, indent: 0 });
+          break;
+        }
+        case 'child_database': if (!skipDb.has(b.id)) out.push({ id: uid(), type: 'db', dbId: nid(b.id), indent: 0 }); skipKids = true; break;
+        case 'child_page': skipKids = true; break;
+        case 'column': break;
         default: if (d.rich_text) mk('p');
       }
-      if (b.children && t !== 'child_page' && t !== 'child_database') {
-        conv(b.children, (t === 'column_list' || t === 'column') ? depth : depth + 1, out);
-      }
+      if (!skipKids && b.children) conv(b.children, (t === 'column') ? depth : depth + 1, out);
     }
   }
   const cleanBlocks = out => {
     const r = []; let empties = 0;
     for (const b of out) {
-      const empty = b.type === 'p' && !b.text.trim();
+      const empty = b.type === 'p' && !(b.text || '').trim();
       if (empty) { empties++; if (empties > 1) continue; } else empties = 0;
       r.push(b);
     }
-    while (r.length && r[r.length - 1].type === 'p' && !r[r.length - 1].text.trim()) r.pop();
+    while (r.length && r[r.length - 1].type === 'p' && !(r[r.length - 1].text || '').trim()) r.pop();
     return r;
   };
 
@@ -107,14 +159,14 @@ function convertNotion(P, D, userId, existing) {
   for (const d of Object.values(D)) (d.rows || []).forEach((rid, i) => { rowPos[rid] = i; });
   const pageOut = [];
   for (const p of Object.values(P)) {
-    if (!isNew(p.id)) continue;
+    if (!isNew(p.id) || skipPages.has(p.id)) continue;
     const par = p.parent || {};
-    const dbId = par.type === 'database_id' && D[par.database_id] ? par.database_id : null;
+    const dbId = par.type === 'database_id' && D[par.database_id] && !skipDb.has(par.database_id) ? par.database_id : null;
+    if (par.type === 'database_id' && !dbId) continue; // صف من قاعدة مستبعدة
     const out = []; conv(p.blocks, 0, out);
     let props = {}, title = (p.title || '').trim();
     if (dbId) {
       const info = dbInfo[dbId];
-      const dbOutObj = dbOut.find(x => x.notion_id === dbId);
       for (const [name, pr] of Object.entries(p.properties || {})) {
         const sp = info.byName[name]; if (!sp || sp.id === 'title') continue;
         let v;
@@ -137,14 +189,13 @@ function convertNotion(P, D, userId, existing) {
         }
         if (v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length)) props[sp.id] = v;
       }
-      void dbOutObj;
     }
     const pp = dbId ? null : pageOf(par);
     pageOut.push({
       id: nid(p.id), user_id: userId,
-      parent_page_id: dbId ? (par.type === 'page_id' ? nid(par.page_id) : null) : (pp ? nid(pp) : null),
+      parent_page_id: dbId ? null : (pp ? nid(pp) : null),
       database_id: dbId ? nid(dbId) : null,
-      title, icon: p.icon && p.icon.type === 'emoji' ? p.icon.emoji : null, cover: null,
+      title, icon: iconOf(p.icon), cover: coverOf(p.cover),
       props, content: cleanBlocks(out),
       position: dbId ? (rowPos[p.id] || 0) : (order.get(p.id) || 0),
       archived: !!p.archived, notion_id: p.id, created_at: p.created || new Date().toISOString()
@@ -154,7 +205,7 @@ function convertNotion(P, D, userId, existing) {
   const byId = new Map(pageOut.map(x => [x.id, x]));
   const depthOf = x => { let d = 0, c = x; while (c && c.parent_page_id && byId.has(c.parent_page_id) && d < 50) { c = byId.get(c.parent_page_id); d++; } return d; };
   pageOut.sort((a, b) => depthOf(a) - depthOf(b));
-  // أب غير موجود (ليس في التصدير) -> null
-  for (const x of pageOut) if (x.parent_page_id && !byId.has(x.parent_page_id) && !(existing && [...existing.values()].includes(x.parent_page_id))) x.parent_page_id = null;
+  const existingIds = existing ? new Set(existing.values()) : new Set();
+  for (const x of pageOut) if (x.parent_page_id && !byId.has(x.parent_page_id) && !existingIds.has(x.parent_page_id)) x.parent_page_id = null;
   return { pages: pageOut, dbs: dbOut };
 }

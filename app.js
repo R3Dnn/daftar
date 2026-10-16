@@ -35,7 +35,8 @@ const isRow = p => !!p.database_id;
 function kidsOf(parentId) {
   const out = [];
   for (const p of S.pages.values()) if (!p.database_id && !p.archived && (p.parent_page_id || null) === parentId) out.push({ kind: 'page', o: p });
-  for (const d of S.dbs.values()) if ((d.parent_page_id || null) === parentId) out.push({ kind: 'db', o: d });
+  const emb = parentId && S.pages.has(parentId) ? embeddedDbIds(S.pages.get(parentId)) : null;
+  for (const d of S.dbs.values()) if ((d.parent_page_id || null) === parentId && !(emb && emb.has(d.id))) out.push({ kind: 'db', o: d });
   return out.sort((a, b) => sortItems(a.o, b.o));
 }
 function rowKids(rowId) { return [...S.pages.values()].filter(p => p.parent_page_id === rowId && !p.archived).sort(sortItems); }
@@ -59,6 +60,11 @@ function newDb(opts = {}) {
   if (tpl === 'tasks') {
     title = 'المهام'; icon = '✅';
     schema.push({ id: uid(), name: 'الحالة', type: 'status', options: statusOpts }, { id: uid(), name: 'الموعد', type: 'date' }, { id: uid(), name: 'ملاحظات', type: 'text' });
+  } else if (tpl === 'study') {
+    title = 'خطة المذاكرة'; icon = '📚';
+    schema[0].name = 'الفصل / الموضوع';
+    schema.push({ id: uid(), name: 'المادة', type: 'select', options: [] }, { id: uid(), name: 'الوقت المقدّر (د)', type: 'number' }, { id: uid(), name: 'الوقت المنقضي (د)', type: 'number' },
+      { id: uid(), name: 'الموعد', type: 'date' }, { id: uid(), name: 'منجز', type: 'checkbox' }, { id: uid(), name: 'للمراجعة', type: 'checkbox' }, { id: uid(), name: 'ملاحظات', type: 'text' });
   } else if (tpl === 'timetable') {
     title = 'الجدول الأسبوعي'; icon = '🗓';
     schema.push({ id: uid(), name: 'النوع', type: 'select', options: [{ id: uid(), name: 'دوام', color: 'blue' }, { id: uid(), name: 'مذاكرة', color: 'purple' }, { id: uid(), name: 'تمرين', color: 'orange' }, { id: uid(), name: 'راحة', color: 'gray' }, { id: uid(), name: 'أخرى', color: 'yellow' }] },
@@ -69,7 +75,10 @@ function newDb(opts = {}) {
   } else {
     schema.push({ id: uid(), name: 'الوسوم', type: 'multi_select', options: [] });
   }
-  const views = tpl === 'timetable' ? [{ id: uid(), name: 'الأسبوع', type: 'week', filters: [], sort: null }, { id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }] : [{ id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }];
+  const sj = schema.find(x => x.name === 'المادة'), cbDone = schema.find(x => x.name === 'منجز'), cbRev = schema.find(x => x.name === 'للمراجعة'), dtS = schema.find(x => x.name === 'الموعد');
+  const studyViews = tpl === 'study' ? [{ id: uid(), name: 'حسب المادة', type: 'table', group: sj.id, filters: [], sort: null }, { id: uid(), name: 'غير المنجز', type: 'table', filters: [{ prop: cbDone.id, op: 'is', value: false }], sort: null },
+    { id: uid(), name: 'قائمة المراجعة', type: 'table', filters: [{ prop: cbRev.id, op: 'is', value: true }], sort: null }, { id: uid(), name: 'تقويم', type: 'calendar', dateProp: dtS.id, filters: [], sort: null }] : null;
+  const views = studyViews ? studyViews : tpl === 'timetable' ? [{ id: uid(), name: 'الأسبوع', type: 'week', filters: [], sort: null }, { id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }] : [{ id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }];
   const st = schema.find(s => s.type === 'status'); if (st) views.push({ id: uid(), name: 'لوحة', type: 'board', groupBy: st.id, filters: [], sort: null });
   const dt = schema.find(s => s.type === 'date'); if (dt) views.push({ id: uid(), name: 'تقويم', type: 'calendar', dateProp: dt.id, filters: [], sort: null });
   const d = {
@@ -333,6 +342,7 @@ function itemMenu(kind, o) {
     { icon: '↗', label: 'فتح', run: () => openItem(kind, o.id) },
     { icon: '✏️', label: 'إعادة تسمية', run: async () => { const v = await promptSheet('الاسم', o.title || ''); if (v != null) { o.title = v; kind === 'db' ? touchDb(o) : touchPage(o); render(); } } },
     { icon: '🙂', label: 'تغيير الأيقونة', run: () => emojiSheet(o.icon, e => { o.icon = e; kind === 'db' ? touchDb(o) : touchPage(o); render(); }) },
+    kind === 'page' && !o.database_id ? { icon: '🏠', label: 'اجعلها صفحة البداية', run: () => { S.ui.startPage = o.id; saveUi(); toast('تمام، تفتح عليها عند تشغيل التطبيق'); } } : null,
     kind === 'page' ? { icon: '＋', label: 'صفحة فرعية', run: () => createPageIn(o.id) } : null,
     kind === 'page' ? { icon: '🗃️', label: 'قاعدة بيانات داخلها', run: () => createDbIn(o.id) } : null,
     { icon: '📂', label: 'نقل إلى…', run: () => movePicker(kind, o) },
@@ -368,7 +378,7 @@ function createPageIn(parentId) {
 function createDbIn(parentId) {
   openSheet({
     title: 'قاعدة بيانات جديدة', body: api => h('div', { class: 'grid' },
-      [['timetable', '🗓', 'جدول أسبوعي (دوام/مذاكرة/تمارين)'], ['tasks', '✅', 'مهام (حالة + موعد)'], ['habits', '💪', 'متتبع عادات'], ['empty', '🗃️', 'جدول فارغ']].map(([t, ic, lb]) =>
+      [['study', '📚', 'خطة مذاكرة (فصول + وقت + مراجعة)'], ['timetable', '🗓', 'جدول أسبوعي (دوام/مذاكرة/تمارين)'], ['tasks', '✅', 'مهام (حالة + موعد)'], ['habits', '💪', 'متتبع عادات'], ['empty', '🗃️', 'جدول فارغ']].map(([t, ic, lb]) =>
         h('button', { class: 'gbtn', onclick: () => { api.close(); const d = newDb({ template: t, parent_page_id: parentId }); if (parentId && !S.ui.expanded.includes(parentId)) S.ui.expanded.push(parentId); openItem('db', d.id); closeDrawer(); } }, h('b', {}, ic), lb)))
   });
 }
@@ -383,6 +393,7 @@ async function refreshAll() {
     const { pages, dbs } = await store.loadAll();
     S.pages = new Map(pages.map(p => [p.id, Object.assign({ props: {}, content: [] }, p)]));
     S.dbs = new Map(dbs.map(d => [d.id, Object.assign({ schema: [], views: [] }, d)]));
+    try { ensureAutogenAll(); } catch (e) {}
     if (!currentExists()) go(''); else render();
     if ('serviceWorker' in navigator) { const r = await navigator.serviceWorker.getRegistration(); if (r) r.update(); }
     toast('تم التحديث ✓');
@@ -432,6 +443,9 @@ async function importFiles(files) {
     t.textContent = `جارٍ الرفع: ${conv.dbs.length} قاعدة، ${conv.pages.length} صفحة…`;
     await store.upsert('dbs', conv.dbs); conv.dbs.forEach(d => S.dbs.set(d.id, d));
     await store.upsert('pages', conv.pages); conv.pages.forEach(p => S.pages.set(p.id, p));
+    const home = conv.pages.find(p => /^unbeatable/i.test((p.title || '').trim()) && !p.database_id);
+    if (home) { S.ui.startPage = home.id; saveUi(); }
+    try { ensureAutogenAll(); } catch (e) { console.warn(e); }
     t.remove(); toast(`تم الاستيراد: ${conv.dbs.length} قاعدة و${conv.pages.length} صفحة`, 5000); render();
   } catch (e) { console.error(e); t.remove(); toast('فشل الاستيراد: ' + (e.message || e), 7000); }
 }
@@ -472,6 +486,7 @@ function homeView() {
       h('div', { class: 'row', style: 'flex-wrap:wrap;margin-bottom:18px' },
         h('button', { class: 'btn primary', onclick: () => createPageIn(null) }, '＋ صفحة جديدة'),
         h('button', { class: 'btn', onclick: () => createDbIn(null) }, '＋ قاعدة بيانات'),
+        h('button', { class: 'btn', onclick: () => templatesSheet(null) }, '✨ قوالب جاهزة'),
         h('button', { class: 'btn', onclick: openSettings }, '📥 استيراد / نسخة احتياطية')),
       dbs.length ? h('div', {}, h('div', { class: 's-label' }, 'قواعد البيانات'), h('div', { class: 'grid' }, dbs.map(d => h('button', { class: 'gbtn', onclick: () => openItem('db', d.id) }, h('b', {}, iconOf(d, 'db')), titleOf(d), h('span', { class: 'muted', style: 'font-size:12px' }, dbRows(d.id).length + ' عنصر'))))) : null,
       recent.length ? h('div', { style: 'margin-top:20px' }, h('div', { class: 's-label' }, 'آخر ما تم تعديله'), recent.map(p => h('div', { class: 'subpages', style: 'border:0;margin:0;padding:0' }, h('div', { class: 'item', onclick: () => openItem('page', p.id) }, h('span', {}, iconOf(p)), h('span', {}, titleOf(p)))))) : null,
@@ -486,6 +501,10 @@ function pageView(page, { modal = false } = {}) {
   title.addEventListener('input', () => { page.title = title.value.replace(/\n/g, ' '); autosize(title); touchPage(page); });
   title.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const f = $('.blk .tx', body); if (f) f.focus(); else { page.content.push({ id: uid(), type: 'p', text: '', indent: 0 }); touchPage(page); body.replaceWith(pageView(page, { modal })); } } });
   const iconBtn = h('button', { class: 'p-icon', 'aria-label': 'الأيقونة', onclick: () => emojiSheet(page.icon, e => { page.icon = e; touchPage(page); iconBtn.textContent = e || '📄'; renderSide(); }) }, page.icon || '📄');
+  const coverBtn = h('button', { class: 'btn sm cover-btn', onclick: () => coverSheet(page, paintCover) });
+  const coverEl = h('div', { class: 'cover' }, coverBtn);
+  function paintCover() { coverEl.setAttribute('style', coverStyle(page.cover)); coverEl.classList.toggle('empty', !page.cover); coverBtn.textContent = page.cover ? '🖼 تغيير الغلاف' : '🖼 إضافة غلاف'; }
+  paintCover();
   const body = h('div', { class: 'page' }, iconBtn, title);
   if (db) body.append(propsPanel(page, db));
   body.append(blocksEditor(page));
@@ -497,12 +516,12 @@ function pageView(page, { modal = false } = {}) {
       h('button', { class: 'btn sm ghost', onclick: () => { const c = newPage({ parent_page_id: page.id }); if (!page.database_id && !S.ui.expanded.includes(page.id)) S.ui.expanded.push(page.id); if (modal) $$('.sheet-bg').forEach(b => b.querySelector('.sheet-h .ibtn:last-child').click()); openItem('page', c.id); S.focusTitle = true; } }, '＋ صفحة فرعية'),
       !page.database_id ? h('button', { class: 'btn sm ghost', onclick: () => createDbIn(page.id) }, '＋ قاعدة بيانات هنا') : null));
   body.append(sub);
-  if (modal) { setTimeout(() => autosize(title), 0); return body; }
+  if (modal) { setTimeout(() => autosize(title), 0); return h('div', {}, coverEl, body); }
   const head = [
     page.database_id ? h('button', { class: 'btn sm', onclick: () => openItem('db', page.database_id) }, '↩ ' + titleOf(S.dbs.get(page.database_id) || {})) : null,
     h('span', { class: 'sync', id: 'syncind' }),
     h('button', { class: 'ibtn', 'aria-label': 'المزيد', onclick: () => itemMenu('page', page) }, '⋯')];
-  const wrap = h('div', {}, topbar(crumbsFor(page), head), body);
+  const wrap = h('div', {}, topbar(crumbsFor(page), head), coverEl, body);
   setTimeout(() => { autosize(title); if (S.focusTitle) { S.focusTitle = false; title.focus(); } }, 0);
   return wrap;
 }
@@ -516,127 +535,4 @@ function setCaret(el, off) {
   el.focus(); const sel = getSelection(), r = document.createRange(), n = el.firstChild;
   if (!n) r.setStart(el, 0); else r.setStart(n, Math.min(off, n.length));
   r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
-}
-
-function blocksEditor(page) {
-  page.content = page.content || [];
-  const root = h('div', { class: 'blocks' });
-  const list = h('div', { class: 'blist' });
-  const save = () => touchPage(page);
-  const idx = b => page.content.indexOf(b);
-
-  function olNumber(i) {
-    const b = page.content[i]; let n = 1;
-    for (let j = i - 1; j >= 0; j--) { const x = page.content[j]; if ((x.indent || 0) < (b.indent || 0)) break; if ((x.indent || 0) === (b.indent || 0)) { if (x.type === 'ol') n++; else break; } }
-    return n;
-  }
-  function draw(focusId, off = 0) {
-    list.replaceChildren(...page.content.map((b, i) => blockEl(b, i)));
-    if (focusId) { const el = list.querySelector(`[data-bid="${focusId}"] .tx`); if (el) setCaret(el, off); }
-  }
-  function insertAfter(b, nb) { page.content.splice(idx(b) + 1, 0, nb); }
-  function splitBlock(b, off) {
-    const listy = ['ul', 'ol', 'todo'].includes(b.type);
-    if (listy && !b.text) { b.type = 'p'; save(); draw(b.id, 0); return; }
-    const before = b.text.slice(0, off), after = b.text.slice(off);
-    b.text = before;
-    const nb = { id: uid(), type: listy ? b.type : 'p', text: after, indent: b.indent || 0 }; if (b.type === 'todo') nb.checked = false;
-    insertAfter(b, nb); save(); draw(nb.id, 0);
-  }
-  function backspaceAtStart(b) {
-    const i = idx(b);
-    if (b.type !== 'p') { b.type = 'p'; save(); draw(b.id, 0); return true; }
-    if ((b.indent || 0) > 0) { b.indent--; save(); draw(b.id, 0); return true; }
-    if (i > 0) {
-      const prev = page.content[i - 1];
-      if (prev.type === 'divider') { page.content.splice(i - 1, 1); save(); draw(b.id, 0); return true; }
-      const len = prev.text.length; prev.text += b.text; page.content.splice(i, 1); save(); draw(prev.id, len); return true;
-    }
-    if (!b.text && page.content.length > 1) { page.content.splice(i, 1); save(); draw(page.content[0].id, 0); return true; }
-    return false;
-  }
-  const SHORT = { '# ': 'h1', '## ': 'h2', '### ': 'h3', '- ': 'ul', '* ': 'ul', '1. ': 'ol', '[] ': 'todo', '> ': 'quote' };
-  function blockEl(b, i) {
-    const el = h('div', { class: 'blk ' + b.type + (b.type === 'todo' && b.checked ? ' done' : ''), 'data-bid': b.id, style: b.indent ? `margin-inline-start:${b.indent * 24}px` : '' });
-    el.append(h('span', { class: 'grip', title: 'اسحب للترتيب' }, '⠿'));
-    if (b.type === 'divider') {
-      el.append(h('div', { class: 'hr' }));
-    } else {
-      if (b.type === 'ul') el.append(h('span', { class: 'mk' }, '•'));
-      else if (b.type === 'ol') el.append(h('span', { class: 'mk' }, olNumber(i) + '.'));
-      else if (b.type === 'todo') el.append(h('span', { class: 'mk' }, h('button', {
-        class: 'cb' + (b.checked ? ' on' : ''), 'aria-label': 'إنجاز', onclick: e => { b.checked = !b.checked; e.currentTarget.className = 'cb' + (b.checked ? ' on' : ''); e.currentTarget.textContent = b.checked ? '✓' : ''; el.classList.toggle('done', b.checked); save(); }
-      }, b.checked ? '✓' : '')));
-      const tx = h('div', { class: 'tx', contenteditable: CE_MODE, dir: 'auto', 'data-ph': b.type === 'p' ? 'اكتب هنا…' : (BLOCK_TYPES[b.type] || {}).label, spellcheck: 'false' });
-      tx.textContent = b.text || '';
-      tx.addEventListener('input', () => {
-        b.text = tx.textContent;
-        const sc = SHORT[b.text];
-        if (sc && b.type === 'p') { b.type = sc; b.text = ''; if (sc === 'todo') b.checked = false; save(); draw(b.id, 0); return; }
-        save();
-      });
-      let shiftEnter = false;
-      tx.addEventListener('beforeinput', e => {
-        if ((e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') && !shiftEnter) { e.preventDefault(); splitBlock(b, caretOffset(tx)); }
-        else if (e.inputType === 'deleteContentBackward') {
-          const sel = getSelection();
-          if (sel.isCollapsed && caretOffset(tx) === 0) { if (backspaceAtStart(b)) e.preventDefault(); }
-        }
-      });
-      tx.addEventListener('keydown', e => {
-        shiftEnter = e.key === 'Enter' && e.shiftKey;
-        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); splitBlock(b, caretOffset(tx)); }
-        else if (e.key === 'Tab') { e.preventDefault(); b.indent = Math.max(0, Math.min(6, (b.indent || 0) + (e.shiftKey ? -1 : 1))); save(); draw(b.id, caretOffset(tx)); }
-        else if (e.key === 'ArrowUp' && caretOffset(tx) === 0 && i > 0) { const p = list.children[i - 1].querySelector('.tx'); if (p) { e.preventDefault(); setCaret(p, p.textContent.length); } }
-        else if (e.key === 'ArrowDown' && caretOffset(tx) >= tx.textContent.length && i < page.content.length - 1) { const n = list.children[i + 1].querySelector('.tx'); if (n) { e.preventDefault(); setCaret(n, 0); } }
-      });
-      tx.addEventListener('paste', e => {
-        e.preventDefault(); const t = (e.clipboardData || window.clipboardData).getData('text/plain');
-        const lines = t.split(/\r?\n/);
-        if (lines.length <= 1) { document.execCommand('insertText', false, t); return; }
-        const off = caretOffset(tx), before = b.text.slice(0, off), after = b.text.slice(off);
-        b.text = before + lines[0]; let last = b;
-        for (let k = 1; k < lines.length; k++) { const nb = { id: uid(), type: 'p', text: lines[k], indent: b.indent || 0 }; insertAfter(last, nb); last = nb; }
-        last.text += after; save(); draw(last.id, last.text.length - after.length);
-      });
-      el.append(tx);
-    }
-    const more = h('button', { class: 'more', 'aria-label': 'خيارات الكتلة', onclick: () => blockMenu(b) }, '⋯');
-    el.append(more);
-    longPress(el.querySelector('.grip'), () => blockMenu(b));
-    return el;
-  }
-  function blockMenu(b) {
-    const i = idx(b);
-    openSheet({
-      title: 'الكتلة', body: api => h('div', {},
-        h('div', { class: 'grid', style: 'margin-bottom:8px' }, Object.entries(BLOCK_TYPES).filter(([k]) => k !== 'divider').map(([k, v]) =>
-          h('button', { class: 'gbtn', style: b.type === k ? 'border-color:var(--accent)' : '', onclick: () => { b.type = k; if (k === 'todo' && b.checked == null) b.checked = false; save(); api.close(); draw(b.id, (b.text || '').length); } }, h('b', {}, v.icon), v.label))),
-        h('button', { class: 'act', onclick: () => { api.close(); const nb = { id: uid(), type: 'p', text: '', indent: b.indent || 0 }; insertAfter(b, nb); save(); draw(nb.id, 0); } }, h('span', { class: 'ai' }, '＋'), h('span', {}, 'إضافة سطر تحتها')),
-        h('button', { class: 'act', onclick: () => { api.close(); const nb = Object.assign({}, b, { id: uid() }); insertAfter(b, nb); save(); draw(nb.id, 0); } }, h('span', { class: 'ai' }, '⧉'), h('span', {}, 'تكرار')),
-        h('button', { class: 'act', onclick: () => { api.close(); b.indent = Math.min(6, (b.indent || 0) + 1); save(); draw(b.id, (b.text || '').length); } }, h('span', { class: 'ai' }, '⇥'), h('span', {}, 'إزاحة للداخل')),
-        (b.indent || 0) > 0 ? h('button', { class: 'act', onclick: () => { api.close(); b.indent--; save(); draw(b.id, (b.text || '').length); } }, h('span', { class: 'ai' }, '⇤'), h('span', {}, 'إزاحة للخارج')) : null,
-        h('button', { class: 'act danger', onclick: () => { api.close(); page.content.splice(i, 1); save(); draw(null); } }, h('span', { class: 'ai' }, '🗑'), h('span', {}, 'حذف')))
-    });
-  }
-  function addMenu() {
-    openSheet({
-      title: 'إضافة', body: api => h('div', { class: 'grid' }, Object.entries(BLOCK_TYPES).map(([k, v]) =>
-        h('button', { class: 'gbtn', onclick: () => { api.close(); const nb = { id: uid(), type: k, text: '', indent: 0 }; if (k === 'todo') nb.checked = false; page.content.push(nb); save(); draw(nb.id, 0); } }, h('b', {}, v.icon), v.label)))
-    });
-  }
-  Sortable.create(list, {
-    handle: '.grip', animation: 150, ghostClass: 'sortable-ghost', draggable: '.blk', forceFallback: false,
-    onEnd: e => { const [m] = page.content.splice(e.oldIndex, 1); page.content.splice(e.newIndex, 0, m); save(); setTimeout(() => draw(null), 0); }
-  });
-  const tail = h('div', {
-    style: 'min-height:90px;cursor:text', onclick: () => {
-      const last = page.content[page.content.length - 1];
-      if (!last || last.type === 'divider' || last.text) { const nb = { id: uid(), type: 'p', text: '', indent: 0 }; page.content.push(nb); save(); draw(nb.id, 0); }
-      else { const el = list.querySelector(`[data-bid="${last.id}"] .tx`); if (el) setCaret(el, el.textContent.length); }
-    }
-  });
-  root.append(list, h('div', { class: 'addblk' }, h('button', { class: 'btn sm ghost', onclick: addMenu }, '＋ إضافة كتلة')), tail);
-  draw(null);
-  return root;
 }

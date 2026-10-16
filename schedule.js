@@ -3,6 +3,7 @@
 
 PROP_TYPES.repeat = { label: 'تكرار أسبوعي', icon: '🔁' };
 VIEW_TYPES.week = { label: 'أسبوعي', icon: '🗓' };
+VIEW_TYPES.gallery = { label: 'معرض', icon: '🖼' };
 
 const DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 const DAYS_S = ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'];
@@ -27,8 +28,9 @@ function rowState(db, row) {
     if (isStatusProp(p) && v) { const o = optOf(p, v); if (o) { if (MISS_RE.test(o.name)) return 'late'; if (DONE_RE.test(o.name)) return 'done'; } }
   }
   const dp = db.schema.find(p => p.type === 'date');
+  const trackable = db.schema.some(p => p.type === 'checkbox' || isStatusProp(p));
   if (dp) { const v = row.props[dp.id]; if (v && v.start) { const end = (v.end || v.start).slice(0, 10); if (end < ymd(new Date())) return 'late'; } }
-  return null;
+  return trackable ? 'open' : null;
 }
 const stClass = (db, row) => { const s = rowState(db, row); return s ? ' st-' + s : ''; };
 
@@ -196,6 +198,7 @@ function todayPanel() {
       const hasSched = db.schema.some(p => p.type === 'repeat' || p.type === 'date'); if (!hasSched) continue;
       items.push(...occurrencesOn(db, today, rows));
       // متأخرات آخر 14 يوم (للعناصر المؤرّخة غير المنجزة، ومرات التكرار غير المسجّلة)
+      if (db.autogen) continue;
       for (let k = 1; k <= 14; k++) { const d = new Date(today); d.setDate(d.getDate() - k); for (const o of occurrencesOn(db, d, rows)) if (occState(o) === 'late') late.push(o); }
     }
     items.sort((a, b) => (a.start || '99').localeCompare(b.start || '99'));
@@ -207,11 +210,61 @@ function todayPanel() {
       kids.push(h('div', { class: 'wk-list' }, items.map(o => occEl(o, draw, { showDb: true }))));
     } else kids.push(h('div', { class: 'muted', style: 'padding:8px 2px' }, 'ما فيه شيء مجدول اليوم 🎉'));
     if (late.length) {
-      kids.push(h('div', { class: 's-label', style: 'color:var(--c-red)' }, h('span', {}, `متأخرة (${late.length})`)));
+      kids.push(h('div', { class: 's-label', style: 'color:var(--c-red)' }, h('span', {}, `مهام متأخرة (${late.length})`)));
       kids.push(h('div', { class: 'wk-list' }, late.slice(0, 8).map(o => { const e = occEl(o, draw, { showDb: true }); const t = e.querySelector('.wk-time'); const lab = `${o.key.slice(5).replace('-', '/')}${o.start ? ' · ' + o.start : ''}`; if (t) t.textContent = lab; else e.querySelector('.wk-body').prepend(h('div', { class: 'wk-time' }, lab)); return e; })));
       if (late.length > 8) kids.push(h('div', { class: 'muted', style: 'padding:4px 2px;font-size:13px' }, `+${late.length - 8} أخرى`));
     }
     wrap.replaceChildren(...kids);
   };
   draw(); return wrap;
+}
+
+
+/* ---------- توليد العادات اليومية تلقائياً (بديل أتمتة نوشن اللي تتوقف) ---------- */
+const normT = t => String(t || '').replace(/\s*\(\d+\)\s*$/, '').trim().toLowerCase();
+function ensureAutogen(db) {
+  const ag = db.autogen; if (!ag || !(ag.rules || []).length) return 0;
+  const today = new Date(), tk = ymd(today);
+  let from = ag.last ? new Date(ag.last + 'T00:00:00') : new Date(today); from.setDate(from.getDate() + 1);
+  const minFrom = new Date(today); minFrom.setDate(minFrom.getDate() - 45); if (from < minFrom) from = minFrom;
+  const have = new Set(dbRows(db.id).map(r => (((r.props[ag.dateProp] || {}).start) || '').slice(0, 10) + '|' + normT(r.title)));
+  let n = 0;
+  for (const d = new Date(from); ymd(d) <= tk; d.setDate(d.getDate() + 1)) {
+    const k = ymd(d), dow = d.getDay();
+    for (const rule of ag.rules) {
+      if (!(rule.days || []).includes(dow) || have.has(k + '|' + normT(rule.title))) continue;
+      const props = { [ag.dateProp]: { start: k, end: null } }; if (ag.statusProp && ag.pending) props[ag.statusProp] = ag.pending;
+      newPage({ database_id: db.id, title: rule.title, icon: rule.icon, props }); n++;
+    }
+  }
+  if (ag.last !== tk) { ag.last = tk; touchDb(db); }
+  return n;
+}
+function ensureAutogenAll() { let n = 0; for (const db of S.dbs.values()) if (db.autogen) n += ensureAutogen(db); if (n) toast(`أضفت ${n} عنصر لعاداتك اليومية`); return n; }
+
+/* ---------- قوالب ---------- */
+function templatesSheet(parentId) {
+  openSheet({
+    title: 'قوالب جاهزة', body: api => h('div', {},
+      h('button', { class: 'act', onclick: () => { api.close(); const d = newDb({ template: 'study', parent_page_id: parentId }); if (parentId && !S.ui.expanded.includes(parentId)) S.ui.expanded.push(parentId); openItem('db', d.id); toast('خطة مذاكرة: أضف الفصول ووقتها وتابع التقدم'); } },
+        h('span', { class: 'ai' }, '📚'), h('span', {}, 'خطة مذاكرة (فصول + وقت مقدّر ومنقضي + مراجعة)')),
+      h('button', { class: 'act', onclick: () => { api.close(); const p = focusPageTemplate(parentId); openItem('page', p.id); } },
+        h('span', { class: 'ai' }, '🎯'), h('span', {}, 'جلسة مذاكرة (مؤقت + موسيقى خلفية + مهامك)')),
+      h('button', { class: 'act', onclick: () => { api.close(); const d = newDb({ template: 'timetable', parent_page_id: parentId }); openItem('db', d.id); } },
+        h('span', { class: 'ai' }, '🗓'), h('span', {}, 'جدول أسبوعي (دوام / مذاكرة / تمارين)')),
+      h('button', { class: 'act', onclick: () => { api.close(); const d = newDb({ template: 'habits', parent_page_id: parentId }); openItem('db', d.id); } },
+        h('span', { class: 'ai' }, '💪'), h('span', {}, 'متتبع عادات')))
+  });
+}
+function focusPageTemplate(parentId) {
+  const p = newPage({ parent_page_id: parentId, title: 'جلسة مذاكرة', icon: '🎯' });
+  p.cover = 'g:' + COVER_GRADS[4];
+  const study = [...S.dbs.values()].find(d => d.schema.some(x => /منقضي/.test(x.name)));
+  const tasks = [...S.dbs.values()].find(d => /to ?do|مهام/i.test(d.title));
+  const left = [{ id: uid(), type: 'h2', text: '⏱ المؤقت', indent: 0 }, { id: uid(), type: 'timer', minutes: 25, indent: 0 }, { id: uid(), type: 'h2', text: '🎧 موسيقى الخلفية', indent: 0 }, { id: uid(), type: 'p', text: 'أضف يوتيوب أو سبوتيفاي: ＋ إضافة كتلة ← يوتيوب / سبوتيفاي', indent: 0 }];
+  const right = [{ id: uid(), type: 'h2', text: '✅ اللي بسويه الحين', indent: 0 }];
+  if (study) right.push({ id: uid(), type: 'db', dbId: study.id, indent: 0 }); else if (tasks) right.push({ id: uid(), type: 'db', dbId: tasks.id, indent: 0 }); else right.push({ id: uid(), type: 'todo', text: 'المهمة الأولى', checked: false, indent: 0 });
+  p.content = [{ id: uid(), type: 'columns', indent: 0, cols: [{ id: uid(), w: 1, blocks: left }, { id: uid(), w: 2, blocks: right }] }];
+  touchPage(p); if (parentId && !S.ui.expanded.includes(parentId)) S.ui.expanded.push(parentId);
+  return p;
 }

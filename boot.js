@@ -46,7 +46,11 @@ async function start(user) {
   } catch (e) { console.error(e); showBoot('تعذّر تحميل البيانات: ' + (e.message || e)); return; }
   $('#boot').hidden = true; $('#app').hidden = false; $('#side').style.display = '';
   store.subscribe(onRealtime);
-  parseHash(); render();
+  try { ensureAutogenAll(); } catch (e) { console.warn('autogen', e); }
+  if (!S.ui.startPage) { const hp = [...S.pages.values()].find(p => !p.database_id && !p.parent_page_id && /^unbeatable/i.test((p.title || '').trim())); if (hp) { S.ui.startPage = hp.id; saveUi(); } }
+  parseHash();
+  if (S.route.t === 'home' && S.ui.startPage && S.pages.has(S.ui.startPage)) { S.route = { t: 'p', id: S.ui.startPage }; history.replaceState(null, '', '#/p/' + S.ui.startPage); }
+  render();
   $('#scrim').addEventListener('click', closeDrawer);
   enablePullToRefresh();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -134,6 +134,7 @@ function propsPanel(page, db) {
 }
 
 /* ---------- فلاتر وفرز ---------- */
+function rangeHas(v, k) { return v.start.slice(0, 10) <= k && (v.end || v.start).slice(0, 10) >= k; }
 function matchFilter(db, r, f) {
   const prop = db.schema.find(p => p.id === f.prop); if (!prop) return true;
   const v = prop.id === 'title' ? r.title : r.props[prop.id];
@@ -147,6 +148,10 @@ function matchFilter(db, r, f) {
     case 'on': return v && v.start && v.start.slice(0, 10) === f.value;
     case 'before': return v && v.start && v.start.slice(0, 10) < f.value;
     case 'after': return v && v.start && v.start.slice(0, 10) > f.value;
+    case 'today': return !!(v && v.start && rangeHas(v, ymd(new Date())));
+    case 'yesterday': { const d = new Date(); d.setDate(d.getDate() - 1); return !!(v && v.start && rangeHas(v, ymd(d))); }
+    case 'thisweek': { const a = new Date(); a.setDate(a.getDate() - a.getDay()); const b = new Date(a); b.setDate(b.getDate() + 6); return !!(v && v.start && v.start.slice(0, 10) <= ymd(b) && (v.end || v.start).slice(0, 10) >= ymd(a)); }
+    case 'overdue': return !!(v && v.start && (v.end || v.start).slice(0, 10) < ymd(new Date()));
     case 'empty': return v == null || v === '' || (Array.isArray(v) && !v.length) || v === false;
     case 'notempty': return !(v == null || v === '' || (Array.isArray(v) && !v.length) || v === false);
   }
@@ -157,7 +162,7 @@ const OPS = {
   checkbox: [['is', 'هو']],
   text: [['contains', 'يحتوي'], ['empty', 'فارغ'], ['notempty', 'غير فارغ']],
   number: [['eq', '='], ['gt', '>'], ['lt', '<'], ['empty', 'فارغ']],
-  date: [['on', 'في'], ['before', 'قبل'], ['after', 'بعد'], ['empty', 'فارغ'], ['notempty', 'غير فارغ']]
+  date: [['today', 'اليوم'], ['yesterday', 'أمس'], ['thisweek', 'هذا الأسبوع'], ['overdue', 'قبل اليوم'], ['on', 'في'], ['before', 'قبل'], ['after', 'بعد'], ['empty', 'فارغ'], ['notempty', 'غير فارغ']]
 };
 const opsFor = t => SEL(t) ? OPS.select : (t === 'checkbox' ? OPS.checkbox : (t === 'number' ? OPS.number : (t === 'date' || t === 'created' ? OPS.date : OPS.text)));
 function cmpVals(prop, a, b, r1, r2) {
@@ -169,9 +174,9 @@ function cmpVals(prop, a, b, r1, r2) {
   if (prop.type === 'select' || prop.type === 'status') return (prop.options.findIndex(o => o.id === a)) - (prop.options.findIndex(o => o.id === b));
   return textOf(prop, a).localeCompare(textOf(prop, b), 'ar');
 }
-function visibleRows(db, view) {
+function visibleRows(db, view, qq) {
   let rows = dbRows(db.id);
-  const q = dbQuery.trim().toLowerCase();
+  const q = (qq !== undefined ? qq : dbQuery).trim().toLowerCase();
   if (q) rows = rows.filter(r => titleOf(r).toLowerCase().includes(q) || db.schema.some(p => p.id !== 'title' && textOf(p, r.props[p.id], r).toLowerCase().includes(q)));
   for (const f of view.filters || []) rows = rows.filter(r => matchFilter(db, r, f));
   if (view.sort) {
@@ -195,19 +200,16 @@ function visibleRows(db, view) {
 /* ---------- صفحة قاعدة البيانات ---------- */
 function currentView(db) {
   if (!db.views || !db.views.length) { db.views = [{ id: uid(), name: 'جدول', type: 'table', filters: [], sort: null }]; touchDb(db); }
-  return db.views.find(v => v.id === S.ui.view[db.id]) || db.views[0];
+  return db.views.find(v => v.id === S.ui.view[db.id]) || db.views.find(v => v.default) || db.views[0];
 }
-function dbPage(db) {
+function dbBody(db, rerender) {
   const view = currentView(db);
-  const rerender = () => { const m = $('#main'); const t = m.scrollTop; m.replaceChildren(dbPage(db)); m.scrollTop = t; };
-  const titleIn = h('input', { class: 'db-title', dir: 'auto', value: db.title || '', placeholder: 'اسم القاعدة', oninput: e => { db.title = e.target.value; touchDb(db); } });
-  titleIn.addEventListener('change', renderSide);
-  const iconB = h('button', { class: 'ibtn', style: 'font-size:30px;width:52px;height:52px', onclick: () => emojiSheet(db.icon, e => { db.icon = e; touchDb(db); render(); }) }, db.icon || '🗃️');
+  let q = '';
   const tabs = h('div', { class: 'vtabs' }, db.views.map(v => h('button', { class: 'vtab' + (v.id === view.id ? ' on' : ''), onclick: () => { if (v.id === view.id) viewSheet(db, v, rerender); else { S.ui.view[db.id] = v.id; saveUi(); rerender(); } } }, VIEW_TYPES[v.type].icon, v.name)),
     h('button', { class: 'vtab', onclick: () => addViewSheet(db, rerender) }, '＋ عرض'));
   const nf = (view.filters || []).length;
   const bar = h('div', { class: 'toolbar' },
-    h('input', { type: 'search', placeholder: '🔍 بحث', dir: 'auto', value: dbQuery, oninput: e => { dbQuery = e.target.value; renderViewBody(); } }),
+    h('input', { type: 'search', placeholder: '🔍 بحث', dir: 'auto', oninput: e => { q = e.target.value; renderViewBody(); } }),
     h('button', { class: 'btn sm', onclick: () => filterSheet(db, view, rerender) }, '⚲ فلتر', nf ? h('span', { class: 'chip' }, nf) : null),
     h('button', { class: 'btn sm', onclick: () => sortSheet(db, view, rerender) }, '⇅ ترتيب', view.sort ? h('span', { class: 'chip' }, (db.schema.find(p => p.id === view.sort.prop) || {}).name) : null),
     view.type === 'table' ? h('button', { class: 'btn sm', onclick: () => columnsSheet(db, view, rerender) }, '☷ الأعمدة') : null,
@@ -215,13 +217,44 @@ function dbPage(db) {
     h('button', { class: 'btn primary', onclick: () => { if (view.type === 'week') { quickAddSheet(db, view, null, rerender); return; } const r = newPage({ database_id: db.id, props: presetsFromFilters(db, view) }); openRow(r.id); } }, view.type === 'week' ? '＋ فترة' : '＋ جديد'));
   const bodyHost = h('div');
   function renderViewBody() {
-    const rows = visibleRows(db, view);
-    const el = view.type === 'week' ? weekView(db, view, rows, rerender) : view.type === 'board' ? boardView(db, view, rows, rerender) : view.type === 'calendar' ? calendarView(db, view, rows, rerender) : view.type === 'list' ? listView(db, view, rows, rerender) : tableView(db, view, rows, rerender);
+    const rows = visibleRows(db, view, q);
+    const el = view.type === 'week' ? weekView(db, view, rows, rerender) : view.type === 'board' ? boardView(db, view, rows, rerender) : view.type === 'calendar' ? calendarView(db, view, rows, rerender) : view.type === 'gallery' ? galleryView(db, view, rows, rerender) : view.type === 'list' ? listView(db, view, rows, rerender) : tableView(db, view, rows, rerender);
     bodyHost.replaceChildren(el);
   }
   renderViewBody();
+  return h('div', { class: 'dbbody' }, tabs, bar, bodyHost);
+}
+function dbPage(db) {
+  const rerender = () => { const m = $('#main'); const t = m.scrollTop; m.replaceChildren(dbPage(db)); m.scrollTop = t; };
+  const titleIn = h('input', { class: 'db-title', dir: 'auto', value: db.title || '', placeholder: 'اسم القاعدة', oninput: e => { db.title = e.target.value; touchDb(db); } });
+  titleIn.addEventListener('change', renderSide);
+  const iconB = h('button', { class: 'ibtn', style: 'font-size:30px;width:52px;height:52px', onclick: () => emojiSheet(db.icon, e => { db.icon = e; touchDb(db); render(); }) }, db.icon || '🗃️');
   const head = [h('span', { class: 'sync', id: 'syncind' }), h('button', { class: 'ibtn', 'aria-label': 'المزيد', onclick: () => itemMenu('db', db) }, '⋯')];
-  return h('div', {}, topbar(crumbsFor(db), head), h('div', { class: 'page wide' }, h('div', { class: 'db-head' }, iconB, titleIn), tabs, bar, bodyHost));
+  return h('div', {}, topbar(crumbsFor(db), head), h('div', { class: 'page wide' }, h('div', { class: 'db-head' }, iconB, titleIn), dbBody(db, rerender)));
+}
+/* قاعدة بيانات داخل صفحة (مثل نوشن): عنوان صغير + عروضها */
+function dbEmbed(db) {
+  const host = h('div', { class: 'dbembed' });
+  const re = () => {
+    host.replaceChildren(h('div', { class: 'db-embed-h' }, h('span', {}, iconOf(db, 'db')), h('a', { class: 'db-embed-t', onclick: () => openItem('db', db.id) }, titleOf(db)),
+      h('button', { class: 'ibtn', style: 'width:36px;height:36px', 'aria-label': 'فتح كاملة', onclick: () => openItem('db', db.id) }, '↗')), dbBody(db, re));
+  };
+  re(); return host;
+}
+
+/* ---------- معرض (بطاقات بصور) ---------- */
+function galleryView(db, view, rows, rerender) {
+  const shown = db.schema.filter(p => p.id !== 'title' && p.type !== 'created' && !(view.hidden || []).includes(p.id)).slice(0, 2);
+  const grid = h('div', { class: 'gallery' });
+  for (const r of rows) {
+    const card = h('div', { class: 'gcard' + stClass(db, r), onclick: () => openRow(r.id) },
+      h('div', { class: 'gcover', style: coverStyle(r.cover) || 'background:var(--panel3)' }),
+      h('div', { class: 'gtitle', dir: 'auto' }, h('span', {}, r.icon || '📄'), h('span', {}, titleOf(r))),
+      (() => { const els = shown.map(p => valueEl(p, r, { interactive: false })).filter(e => e.textContent || e.tagName === 'BUTTON'); return els.length ? h('div', { class: 'cp', style: 'padding:0 10px 10px' }, els) : null; })());
+    longPress(card, () => rowMenu(r)); grid.append(card);
+  }
+  grid.append(h('div', { class: 'gcard gnew', onclick: () => { const r = newPage({ database_id: db.id, props: presetsFromFilters(db, view) }); openRow(r.id); } }, '＋ صفحة جديدة'));
+  return grid;
 }
 function presetsFromFilters(db, view) {
   const pr = {};
@@ -252,19 +285,48 @@ function tableView(db, view, rows, rerender) {
     props.map(pr => h('th', { onclick: () => propSheet(db, view, pr, rerender) }, PROP_TYPES[pr.type].icon + ' ' + pr.name + (view.sort && view.sort.prop === pr.id ? (view.sort.dir === 'desc' ? ' ↓' : ' ↑') : ''))),
     h('th', { class: 'g', onclick: () => addPropSheet(db, view, () => rerender()), 'aria-label': 'إضافة خاصية' }, '＋')));
   const tbody = h('tbody');
-  for (const r of rows) {
+  const addRowEl = r => {
     const tr = h('tr', { 'data-id': r.id },
       h('td', { class: 'g' }, h('span', { class: 'rgrip', title: 'اسحب للترتيب' }, '⠿')),
       h('td', { class: 'tcell' + stClass(db, r), onclick: () => openRow(r.id) }, h('span', {}, iconOf(r) === '📄' ? '' : iconOf(r) + ' '), titleOf(r)),
-      props.map(pr => h('td', { class: 'cell', onclick: () => { if (pr.type !== 'checkbox') editValue(r, pr, () => rerender()); } }, valueEl(pr, r))),
+      props.map(pr => cellTd(pr, r, rerender)),
       h('td', { class: 'g' }));
     longPress(tr, () => rowMenu(r));
-    tbody.append(tr);
+    return tr;
+  };
+  const gp = view.group ? db.schema.find(p => p.id === view.group && SEL(p.type)) : null;
+  if (gp) {
+    const groups = (gp.options || []).map(o => ({ key: o.id, opt: o, rows: [] })).concat([{ key: '', opt: null, rows: [] }]);
+    for (const r of rows) { const v = r.props[gp.id]; const k = gp.type === 'multi_select' ? (v || [])[0] || '' : (v || ''); (groups.find(x => x.key === k) || groups[groups.length - 1]).rows.push(r); }
+    const cbp = db.schema.find(p => p.type === 'checkbox');
+    const estP = db.schema.find(p => p.type === 'number' && /مقدّر|مقدر|estimate/i.test(p.name)), spP = db.schema.find(p => p.type === 'number' && /منقضي|spent/i.test(p.name));
+    for (const g of groups) {
+      if (!g.rows.length) continue;
+      const ck = 'g:' + db.id + ':' + view.id + ':' + g.key; S.ui.collapsed = S.ui.collapsed || []; const col = S.ui.collapsed.includes(ck);
+      const done = cbp ? g.rows.filter(r => r.props[cbp.id]).length : 0;
+      let sum = '';
+      if (cbp) sum += `${done}/${g.rows.length} منجز`;
+      if (estP) { const left = g.rows.filter(r => !(cbp && r.props[cbp.id])).reduce((a, r) => a + Math.max(0, (r.props[estP.id] || 0) - (spP ? (r.props[spP.id] || 0) : 0)), 0); if (left) sum += ` · باقي ${left} د (${(left / 60).toFixed(1)} س)`; }
+      tbody.append(h('tr', { class: 'grp' }, h('td', { colspan: props.length + 3, onclick: () => { const i = S.ui.collapsed.indexOf(ck); if (i >= 0) S.ui.collapsed.splice(i, 1); else S.ui.collapsed.push(ck); saveUi(); rerender(); } },
+        h('span', { class: 'gtw' }, col ? '◂' : '▾'), g.opt ? pill(g.opt) : h('span', { class: 'muted' }, 'بدون ' + gp.name), h('span', { class: 'muted', style: 'margin-inline-start:8px;font-size:13px' }, sum || g.rows.length))));
+      if (!col) g.rows.forEach(r => tbody.append(addRowEl(r)));
+    }
+  } else {
+    rows.forEach(r => tbody.append(addRowEl(r)));
+    Sortable.create(tbody, { handle: '.rgrip', animation: 150, ghostClass: 'sortable-ghost', onEnd: e => reorderRow(e.item, view) });
   }
-  Sortable.create(tbody, { handle: '.rgrip', animation: 150, ghostClass: 'sortable-ghost', onEnd: e => reorderRow(e.item, view) });
   const wrap = h('div', { class: 'tbl-wrap' }, h('table', {}, thead, tbody));
   return h('div', {}, wrap, h('div', { class: 'newrow', onclick: () => { const r = newPage({ database_id: db.id, props: presetsFromFilters(db, view) }); openRow(r.id); } }, '＋ جديد'),
     h('div', { class: 'muted', style: 'padding:4px 8px;font-size:13px' }, rows.length + ' عنصر'));
+}
+function cellTd(pr, r, rerender) {
+  const td = h('td', { class: 'cell', onclick: () => { if (pr.type !== 'checkbox') editValue(r, pr, () => rerender()); } }, valueEl(pr, r));
+  if (typeof isStatusProp === 'function' && isStatusProp(pr)) {
+    const done = (pr.options || []).find(o => DONE_RE.test(o.name)), miss = (pr.options || []).find(o => MISS_RE.test(o.name));
+    const mk = (o, ic, cls) => h('button', { class: 'qb ' + cls, 'aria-label': o.name, onclick: e => { e.stopPropagation(); if (r.props[pr.id] === o.id) { const first = (pr.options || [])[0]; if (first && first !== o) r.props[pr.id] = first.id; else delete r.props[pr.id]; } else r.props[pr.id] = o.id; touchPage(r); rerender(); } }, ic);
+    if (done || miss) td.append(...[done && mk(done, '✓', 'ok'), miss && mk(miss, '✗', 'bad')].filter(Boolean));
+  }
+  return td;
 }
 function reorderRow(item, view) {
   const r = S.pages.get(item.dataset.id); if (!r) return;
@@ -332,39 +394,62 @@ function listView(db, view, rows, rerender) {
 function calendarView(db, view, rows, rerender) {
   const dp = db.schema.find(p => p.id === view.dateProp && p.type === 'date');
   if (!dp) return h('div', { class: 'muted', style: 'padding:20px' }, 'اختر خاصية «تاريخ» لهذا العرض.', h('div', { style: 'margin-top:10px' }, h('button', { class: 'btn', onclick: () => viewSheet(db, view, rerender) }, 'إعدادات العرض')));
-  const key = db.id + ':' + view.id; const today = new Date();
-  let ym = S.ui.cal[key] || `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+  const key = db.id + ':' + view.id; const today = new Date(), tk = ymd(today);
+  const ym = S.ui.cal[key] || `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
   const [Y, M] = ym.split('-').map(Number);
   const first = new Date(Y, M - 1, 1), start = new Date(Y, M - 1, 1 - first.getDay());
   const shift = n => { const d = new Date(Y, M - 1 + n, 1); S.ui.cal[key] = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; saveUi(); rerender(); };
   const label = new Intl.DateTimeFormat('ar-u-ca-gregory', { month: 'long', year: 'numeric' }).format(first);
-  const dots = db.schema.find(p => p.type === 'status') || db.schema.find(p => p.type === 'select');
-  const byDay = {};
-  for (const r of rows) { const v = r.props[dp.id]; if (v && v.start) (byDay[v.start.slice(0, 10)] = byDay[v.start.slice(0, 10)] || []).push(r); }
-  const grid = h('div', { class: 'cal' });
-  ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].forEach(d => grid.append(h('div', { class: 'dow' }, d)));
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), k = ymd(d);
-    if (i >= 35 && d.getMonth() !== M - 1) break;
-    const evs = h('div', { class: 'evs', 'data-day': k });
-    for (const r of byDay[k] || []) {
-      const o = dots ? optOf(dots, r.props[dots.id]) : null;
-      const sc = stClass(db, r);
-      evs.append(h('div', { class: 'ev' + sc, 'data-id': r.id, style: o && !sc ? `border-inline-start:3px solid var(--c-${o.color || 'gray'})` : '', onclick: () => openRow(r.id) }, titleOf(r)));
+  const sel = db.schema.find(p => p.type === 'select' && !isStatusProp(p));
+  const evs = [];
+  for (const r of rows) { const v = r.props[dp.id]; if (v && v.start) { const s0 = v.start.slice(0, 10), e0 = (v.end || v.start).slice(0, 10); evs.push({ r, s: s0, e: e0 < s0 ? s0 : e0 }); } }
+  const wrap = h('div', { class: 'cal2' });
+  const dow = h('div', { class: 'cdow' }); ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].forEach(d => dow.append(h('div', {}, d)));
+  wrap.append(dow);
+  const weeks = []; for (let w = 0; w < 6; w++) { const ws = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7); if (w >= 5 && ws.getMonth() !== M - 1) break; weeks.push(ws); }
+  for (const ws of weeks) {
+    const days = Array.from({ length: 7 }, (_, i) => new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + i)), keys = days.map(ymd);
+    const wk0 = keys[0], wk6 = keys[6];
+    const bars = [], singles = {};
+    for (const ev of evs) {
+      if (ev.e < wk0 || ev.s > wk6) continue;
+      if (ev.s === ev.e) { (singles[ev.s] = singles[ev.s] || []).push(ev); continue; }
+      const c1 = Math.max(0, keys.indexOf(ev.s < wk0 ? wk0 : ev.s)), c2 = keys.indexOf(ev.e > wk6 ? wk6 : ev.e);
+      bars.push({ ev, c1, c2, cutL: ev.s < wk0, cutR: ev.e > wk6 });
     }
-    Sortable.create(evs, {
-      group: 'cal-' + view.id, animation: 150, delay: 160, delayOnTouchOnly: true, ghostClass: 'sortable-ghost', onEnd: e => {
-        const r = S.pages.get(e.item.dataset.id); if (!r) return; const old = r.props[dp.id] || {};
-        const t = old.start && old.start.length > 10 ? old.start.slice(10) : '';
-        r.props[dp.id] = { start: e.to.dataset.day + t, end: old.end || null }; touchPage(r); rerender();
-      }
+    bars.sort((x, y) => x.c1 - y.c1 || (y.c2 - y.c1) - (x.c2 - x.c1));
+    const lanes = []; for (const b of bars) { let l = 0; while (lanes[l] && lanes[l] >= b.c1) l++; lanes[l] = b.c2; b.lane = l; }
+    const nl = lanes.length;
+    const grid = h('div', { class: 'cweek', style: `grid-template-rows:auto repeat(${nl},auto) minmax(34px,auto)` });
+    days.forEach((d, i) => {
+      grid.append(h('div', { class: 'cbg' + (d.getMonth() !== M - 1 ? ' out' : '') + (keys[i] === tk ? ' today' : ''), style: `grid-column:${i + 1};grid-row:1/-1` }));
+      grid.append(h('div', { class: 'cdn', style: `grid-column:${i + 1};grid-row:1` }, h('span', { class: 'dnum' }, d.getDate()),
+        h('button', { class: 'dn', 'aria-label': 'إضافة في هذا اليوم', onclick: () => { const pre = presetsFromFilters(db, view); pre[dp.id] = { start: keys[i], end: null }; const r = newPage({ database_id: db.id, props: pre }); openRow(r.id); } }, '＋')));
     });
-    grid.append(h('div', { class: 'day' + (d.getMonth() !== M - 1 ? ' out' : '') + (k === ymd(today) ? ' today' : '') },
-      h('div', { class: 'row', style: 'gap:0;justify-content:space-between' }, h('span', { class: 'dn' }, d.getDate()),
-        h('button', { class: 'dn', 'aria-label': 'إضافة في هذا اليوم', onclick: () => { const pre = presetsFromFilters(db, view); pre[dp.id] = { start: k, end: null }; const r = newPage({ database_id: db.id, props: pre }); openRow(r.id); } }, '＋')), evs));
+    for (const b of bars) {
+      const r = b.ev.r, st = rowState(db, r), op = sel ? optOf(sel, r.props[sel.id]) : null;
+      grid.append(h('div', { class: 'cbar' + (st ? ' st-' + st : '') + (b.cutL ? ' cutl' : '') + (b.cutR ? ' cutr' : ''), style: `grid-column:${b.c1 + 1}/${b.c2 + 2};grid-row:${2 + b.lane}`, onclick: () => openRow(r.id) },
+        h('span', { class: 'cbt', dir: 'auto' }, (r.icon ? r.icon + ' ' : '') + titleOf(r)), op ? pill(op) : null));
+    }
+    days.forEach((d, i) => {
+      const lst = h('div', { class: 'evs', 'data-day': keys[i], style: `grid-column:${i + 1};grid-row:${2 + nl}` });
+      for (const ev of singles[keys[i]] || []) {
+        const r = ev.r, o = sel ? optOf(sel, r.props[sel.id]) : null, sc = stClass(db, r);
+        lst.append(h('div', { class: 'ev' + sc, 'data-id': r.id, style: o && !sc ? `border-inline-start:3px solid var(--c-${o.color || 'gray'})` : '', onclick: () => openRow(r.id) }, titleOf(r)));
+      }
+      Sortable.create(lst, {
+        group: 'cal-' + view.id, animation: 150, delay: 160, delayOnTouchOnly: true, ghostClass: 'sortable-ghost', onEnd: e => {
+          const r = S.pages.get(e.item.dataset.id); if (!r) return; const old = r.props[dp.id] || {};
+          const t = old.start && old.start.length > 10 ? old.start.slice(10) : '';
+          r.props[dp.id] = { start: e.to.dataset.day + t, end: old.end || null }; touchPage(r); rerender();
+        }
+      });
+      grid.append(lst);
+    });
+    wrap.append(grid);
   }
   return h('div', {}, h('div', { class: 'cal-head' }, h('button', { class: 'ibtn', onclick: () => shift(-1), 'aria-label': 'الشهر السابق' }, '›'), h('b', { class: 'grow', style: 'text-align:center' }, label), h('button', { class: 'ibtn', onclick: () => shift(1), 'aria-label': 'الشهر التالي' }, '‹'),
-    h('button', { class: 'btn sm', onclick: () => { delete S.ui.cal[key]; saveUi(); rerender(); } }, 'اليوم')), grid);
+    h('button', { class: 'btn sm', onclick: () => { delete S.ui.cal[key]; saveUi(); rerender(); } }, 'اليوم')), wrap);
 }
 
 /* ---------- شيتات الإعدادات ---------- */
@@ -380,7 +465,7 @@ function filterSheet(db, view, rerender) {
           const propSel = h('select', { onchange: e => { f.prop = e.target.value; const np = db.schema.find(p => p.id === f.prop); f.op = opsFor(np.type)[0][0]; f.value = np.type === 'checkbox' ? true : ''; save(); draw(); } }, db.schema.map(p => h('option', { value: p.id, selected: p.id === f.prop }, p.name)));
           const opSel = h('select', { onchange: e => { f.op = e.target.value; save(); draw(); } }, opsFor(prop.type).map(([k, l]) => h('option', { value: k, selected: k === f.op }, l)));
           let val = null;
-          if (f.op !== 'empty' && f.op !== 'notempty') {
+          if (!['empty', 'notempty', 'today', 'yesterday', 'thisweek', 'overdue'].includes(f.op)) {
             if (SEL(prop.type)) val = h('select', { onchange: e => { f.value = e.target.value; save(); } }, [h('option', { value: '' }, '— اختر —')].concat((prop.options || []).map(o => h('option', { value: o.id, selected: o.id === f.value }, o.name))));
             else if (prop.type === 'checkbox') val = h('select', { onchange: e => { f.value = e.target.value === '1'; save(); } }, [h('option', { value: '1', selected: f.value === true }, 'مفعّل'), h('option', { value: '0', selected: f.value === false }, 'غير مفعّل')]);
             else if (prop.type === 'date' || prop.type === 'created') val = h('input', { type: 'date', value: f.value || '', onchange: e => { f.value = e.target.value; save(); } });
@@ -422,6 +507,7 @@ function viewSheet(db, view, rerender) {
       const typeGrid = h('div', { class: 'grid', style: 'margin-bottom:12px' }, Object.entries(VIEW_TYPES).map(([k, v]) => h('button', { class: 'gbtn', style: view.type === k ? 'border-color:var(--accent)' : '', onclick: () => { setViewType(db, view, k); touchDb(db); api.close(); } }, h('b', {}, v.icon), v.label)));
       const selects = [];
       if (view.type === 'board') selects.push(h('div', { class: 'field' }, h('label', {}, 'تجميع حسب'), h('select', { onchange: e => { view.groupBy = e.target.value; touchDb(db); } }, db.schema.filter(p => p.type === 'select' || p.type === 'status').map(p => h('option', { value: p.id, selected: p.id === view.groupBy }, p.name)))));
+      if (view.type === 'table' || view.type === 'list') selects.push(h('div', { class: 'field' }, h('label', {}, 'تجميع حسب'), h('select', { onchange: e => { view.group = e.target.value || null; touchDb(db); } }, [h('option', { value: '' }, '— بدون تجميع —')].concat(db.schema.filter(p => SEL(p.type)).map(p => h('option', { value: p.id, selected: p.id === view.group }, p.name))))));
       if (view.type === 'calendar') selects.push(h('div', { class: 'field' }, h('label', {}, 'خاصية التاريخ'), h('select', { onchange: e => { view.dateProp = e.target.value; touchDb(db); } }, db.schema.filter(p => p.type === 'date').map(p => h('option', { value: p.id, selected: p.id === view.dateProp }, p.name)))));
       return h('div', {}, h('div', { class: 'field' }, h('label', {}, 'الاسم'), nm), typeGrid, ...selects,
         h('button', { class: 'act', onclick: () => { api.close(); const c = JSON.parse(JSON.stringify(view)); c.id = uid(); c.name += ' (نسخة)'; db.views.push(c); S.ui.view[db.id] = c.id; saveUi(); touchDb(db); } }, h('span', { class: 'ai' }, '⧉'), h('span', {}, 'تكرار العرض')),

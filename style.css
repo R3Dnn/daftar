@@ -187,6 +187,72 @@ td.g,th.g{width:36px;min-width:36px;text-align:center;color:var(--muted);padding
 .bar{height:6px;border-radius:99px;background:var(--panel3);margin:2px 0 8px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--c-green)}
 
+/* غلاف الصفحة */
+.cover{height:210px;background-size:cover;background-position:center;position:relative;margin-top:-6px}
+.cover.empty{height:0;margin:0}
+.cover .cover-btn{position:absolute;inset-inline-end:14px;bottom:10px;opacity:.9;background:#000a;backdrop-filter:blur(4px)}
+.cover.empty .cover-btn{position:static;display:inline-flex;margin:4px 18px 0;opacity:.6;background:transparent}
+.cover:not(.empty)+.page .p-icon{margin-top:-46px;position:relative;z-index:2}
+@media(max-width:700px){.cover{height:150px}}
+/* صور وأعمدة وتضمين */
+.rich{flex:1;min-width:0}
+.imgblk{margin:6px 0;cursor:pointer}
+.imgblk img{max-width:100%;border-radius:12px;display:block;margin-inline:auto}
+.imgblk.half img{max-width:50%}.imgblk.small img{max-width:240px}
+.imgblk figcaption{text-align:center;color:var(--muted);font-size:14px;padding-top:4px}
+.imgerr{border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted)}
+.cols{display:grid;gap:18px;align-items:start;width:100%;direction:ltr}
+.col-in{min-width:0;direction:rtl}
+@media(max-width:760px){.cols{grid-template-columns:1fr!important}}
+.blk.columns .grip,.blk.db .grip{align-self:flex-start}
+.embed iframe{width:100%;border:0;border-radius:12px;display:block;background:#000}
+.linkcard{display:block;padding:12px;border:1px solid var(--line);border-radius:12px;color:var(--accent);word-break:break-all}
+.timer{background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:14px;text-align:center}
+.tm-t{font-size:54px;font-weight:700;letter-spacing:2px;direction:ltr;font-variant-numeric:tabular-nums}
+.dbembed{margin:8px 0;min-width:0}
+.db-embed-h{display:flex;align-items:center;gap:8px;font-size:20px;font-weight:700}
+.db-embed-t{cursor:pointer}
+.dbbody .vtabs{margin-top:2px}
+/* معرض */
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.gcard{background:var(--panel2);border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer}
+.gcard:active{filter:brightness(1.15)}
+.gcover{height:140px;background-size:cover;background-position:center}
+.gtitle{display:flex;gap:8px;padding:10px;font-weight:600}
+.gcard.gnew{display:grid;place-items:center;min-height:150px;color:var(--muted);border-style:dashed}
+/* جدول مجمّع وأزرار سريعة */
+tr.grp td{background:var(--panel2);cursor:pointer;height:38px;font-weight:600}
+.gtw{display:inline-block;width:20px;color:var(--muted)}
+.qb{width:28px;height:28px;border-radius:8px;margin-inline-start:4px;font-size:15px;background:var(--panel3);flex:none}
+.qb.ok{color:var(--c-green)}.qb.bad{color:var(--c-red)}
+.st-open{border-inline-start:3px solid #ff6b6b66!important;background-image:linear-gradient(#ff6b6b0f,#ff6b6b0f)}
+.tcell.st-open{border-inline-start:0!important;background-image:none}
+.tcell.st-open::before{content:'●';color:#ff6b6b99;margin-inline-end:6px}
+/* تقويم بأشرطة ممتدة */
+.cal2{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}
+.cdow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));background:var(--panel2)}
+.cdow div{padding:6px;text-align:center;color:var(--muted);font-size:13px}
+.cweek{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));position:relative;border-top:1px solid var(--line);column-gap:0;row-gap:3px;padding-bottom:3px}
+.cbg{border-inline-start:1px solid var(--line);pointer-events:none}
+.cbg.out{background:#0003}.cbg.today{background:#6c8cff14}
+.cdn{display:flex;justify-content:space-between;align-items:center;padding:2px 4px 0;z-index:1}
+.cdn .dnum{font-size:12px;color:var(--muted);width:24px;height:24px;display:grid;place-items:center}
+.cdn .dn{font-size:14px;color:var(--muted);width:24px;height:24px;display:grid;place-items:center;opacity:.5}
+.cbg.today~.cdn .dnum{}
+.cbar{z-index:1;margin:0 3px;padding:4px 8px;border-radius:8px;background:var(--panel3);display:flex;gap:8px;align-items:center;overflow:hidden;cursor:pointer;min-height:30px}
+.cbar.cutl{border-start-start-radius:0;border-end-start-radius:0;margin-inline-start:0}.cbar.cutr{border-start-end-radius:0;border-end-end-radius:0;margin-inline-end:0}
+.cbt{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.cweek .evs{z-index:1;padding:0 3px}
+/* كثافة أصغر على الكمبيوتر (الماوس) — اللمس يبقى كبير */
+@media(pointer:fine){
+  :root{--tap:36px}
+  html,body{font-size:15px}
+  .col{width:262px}.card{padding:8px}
+  th,td{height:34px}
+  .p-title{font-size:30px}
+  .tm-t{font-size:44px}
+}
+
 /* sheets */
 #sheets{position:fixed;inset:0;z-index:100;pointer-events:none}
 .sheet-bg{position:fixed;inset:0;background:#000a;pointer-events:auto;display:flex;align-items:flex-end;justify-content:center;animation:fade .15s}
