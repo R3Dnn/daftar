@@ -48,6 +48,7 @@ async function start(user) {
   store.subscribe(onRealtime);
   parseHash(); render();
   $('#scrim').addEventListener('click', closeDrawer);
+  enablePullToRefresh();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 

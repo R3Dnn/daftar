@@ -265,7 +265,7 @@ function renderSide() {
     tree.append(treeLevel(null));
   }
   side.replaceChildren(
-    h('div', { class: 's-head' }, h('div', { class: 'logo' }, '📓 دفتر'), h('span', { class: 'sync', id: 'syncind' }), h('button', { class: 'ibtn', 'aria-label': 'الإعدادات', onclick: openSettings }, '⚙')),
+    h('div', { class: 's-head' }, h('div', { class: 'logo' }, '📓 دفتر'), h('span', { class: 'sync', id: 'syncind' }), h('button', { class: 'ibtn', 'aria-label': 'تحديث', onclick: refreshAll }, '↻'), h('button', { class: 'ibtn', 'aria-label': 'الإعدادات', onclick: openSettings }, '⚙')),
     h('div', { class: 's-search' }, h('input', { type: 'search', placeholder: '🔍 بحث', value: S.ui.search, dir: 'auto', oninput: e => { S.ui.search = e.target.value; saveUi(); const pos = e.target.selectionStart; renderSide(); const n = $('.s-search input'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } } })),
     h('div', { class: 's-foot' },
       h('button', { class: 'btn primary', onclick: () => createPageIn(null) }, '＋ صفحة'),
@@ -371,6 +371,34 @@ function createDbIn(parentId) {
       [['timetable', '🗓', 'جدول أسبوعي (دوام/مذاكرة/تمارين)'], ['tasks', '✅', 'مهام (حالة + موعد)'], ['habits', '💪', 'متتبع عادات'], ['empty', '🗃️', 'جدول فارغ']].map(([t, ic, lb]) =>
         h('button', { class: 'gbtn', onclick: () => { api.close(); const d = newDb({ template: t, parent_page_id: parentId }); if (parentId && !S.ui.expanded.includes(parentId)) S.ui.expanded.push(parentId); openItem('db', d.id); closeDrawer(); } }, h('b', {}, ic), lb)))
   });
+}
+
+/* ---------------- تحديث البيانات (زر + سحب للأسفل) ---------------- */
+let refreshing = false;
+async function refreshAll() {
+  if (refreshing) return; refreshing = true;
+  const ind = $('.ptr'); if (ind) { ind.textContent = '↻ جارٍ التحديث…'; ind.classList.add('spin'); }
+  try {
+    await flush();
+    const { pages, dbs } = await store.loadAll();
+    S.pages = new Map(pages.map(p => [p.id, Object.assign({ props: {}, content: [] }, p)]));
+    S.dbs = new Map(dbs.map(d => [d.id, Object.assign({ schema: [], views: [] }, d)]));
+    if (!currentExists()) go(''); else render();
+    if ('serviceWorker' in navigator) { const r = await navigator.serviceWorker.getRegistration(); if (r) r.update(); }
+    toast('تم التحديث ✓');
+  } catch (e) { toast('تعذّر التحديث: ' + (e.message || e)); }
+  refreshing = false; if (ind) { ind.classList.remove('spin'); }
+}
+function enablePullToRefresh() {
+  if (document.querySelector('.ptr')) return;
+  const main = $('#main'); const ind = h('div', { class: 'ptr' }, '↓ اسحب للتحديث'); document.body.append(ind);
+  let y0 = null, pull = 0;
+  main.addEventListener('touchstart', e => { y0 = (main.scrollTop <= 0 && !e.target.closest('.tbl-wrap,.board,.week,[contenteditable],input,textarea,select')) ? e.touches[0].clientY : null; pull = 0; }, { passive: true });
+  main.addEventListener('touchmove', e => {
+    if (y0 == null || refreshing) return; pull = Math.max(0, e.touches[0].clientY - y0);
+    if (pull > 8) { ind.style.transform = `translateY(${Math.min(pull, 100) - 70}px)`; ind.textContent = pull > 80 ? '↻ أفلت للتحديث' : '↓ اسحب للتحديث'; }
+  }, { passive: true });
+  main.addEventListener('touchend', () => { const go = y0 != null && pull > 80; ind.style.transform = ''; y0 = null; pull = 0; if (go) refreshAll(); });
 }
 
 /* ---------------- الإعدادات / استيراد / تصدير ---------------- */

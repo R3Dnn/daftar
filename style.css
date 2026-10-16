@@ -8,6 +8,11 @@
   --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{touch-action:manipulation;overscroll-behavior:none;-webkit-touch-callout:none}
+button,.btn,.ibtn,.tt,.node,.vtab,.chip,.gbtn,.act,th,.cal .dn{-webkit-user-select:none;user-select:none}
+#main,.sheet-b,.s-scroll,.tbl-wrap,.board,.week{overscroll-behavior:contain}
+.ptr{position:fixed;top:calc(var(--safe-t) + 6px);left:0;right:0;margin-inline:auto;width:max-content;background:var(--panel3);border:1px solid var(--line);padding:6px 14px;border-radius:99px;font-size:14px;z-index:40;transform:translateY(-70px);transition:transform .18s;pointer-events:none}
+.ptr.spin{transform:translateY(0)}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
   font:16px/1.55 system-ui,-apple-system,"Segoe UI",Tahoma,"Noto Sans Arabic",sans-serif;
   -webkit-text-size-adjust:100%;overscroll-behavior:none}

@@ -59,7 +59,11 @@ class SupaStore {
   async session() { const { data } = await this.sb.auth.getSession(); return data.session; }
   onAuth(cb) { this.sb.auth.onAuthStateChange((ev, s) => cb(ev, s)); }
   async signIn(email, password) { const { data, error } = await this.sb.auth.signInWithPassword({ email, password }); if (error) throw error; return data.session; }
-  async signUp(email, password) { const { data, error } = await this.sb.auth.signUp({ email, password }); if (error) throw error; return data; }
+  async signUp(email, password) {
+    // رابط التأكيد يرجع لصفحة التطبيق نفسها (مع المسار /daftar/)
+    const { data, error } = await this.sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+    if (error) throw error; return data;
+  }
   async signOut() { await this.sb.auth.signOut(); }
   async fetchAll(t) {
     let out = [], from = 0; const step = 1000;
